@@ -7,6 +7,7 @@ module Servant.ChinesePod.API (
   , Account
   , Login
   , Logout
+  , GetUserInfo
     -- * Request types
   , ReqLogin(..)
   , ReqSignature(..)
@@ -14,9 +15,13 @@ module Servant.ChinesePod.API (
   , RespLogin(..)
     -- * Constructing requests from previous responses
   , FromLogin(..)
+    -- * Auxiliary dataypes used to define the API
+  , OK(..)
+  , Undocumented
     -- * ChinesePod specific datatypes
   , AccessToken(..)
   , UserId(..)
+  , Level(..)
   ) where
 
 import Control.Monad
@@ -43,11 +48,13 @@ type ChinesePod = "api" :> "0.6" :> Services
 
 type Services = "account" :> Account
 
-type Account = "login"  :> Login
-          :<|> "logout" :> Logout
+type Account = "login"         :> Login
+          :<|> "logout"        :> Logout
+          :<|> "get-user-info" :> GetUserInfo
 
-type Login  = ReqBody '[FormUrlEncoded] ReqLogin  :> Post '[JSON] RespLogin
-type Logout = ReqBody '[FormUrlEncoded] ReqLogout :> Post '[JSON] OK
+type Login       = ReqBody '[FormUrlEncoded] ReqLogin       :> Post '[JSON] RespLogin
+type Logout      = ReqBody '[FormUrlEncoded] ReqLogout      :> Post '[JSON] OK
+type GetUserInfo = ReqBody '[FormUrlEncoded] ReqGetUserInfo :> Post '[JSON] RespGetUserInfo
 
 {-------------------------------------------------------------------------------
   Request types
@@ -69,6 +76,11 @@ data ReqSignature = ReqSignature {
 data ReqLogout = ReqLogout {
       reqLogoutAccessToken :: AccessToken
     , reqLogoutUserId      :: UserId
+    }
+
+data ReqGetUserInfo = ReqGetUserInfo {
+      reqGetUserInfoAccessToken :: AccessToken
+    , reqGetUserInfoUserId      :: UserId
     }
 
 -- | The 'ToText' instance for 'ReqSignature' is the hash
@@ -93,6 +105,12 @@ instance ToFormUrlEncoded ReqLogout where
     toFormUrlEncoded ReqLogout{..} = [
           ( "access_token" , toText reqLogoutAccessToken )
         , ( "user_id"      , toText reqLogoutUserId      )
+        ]
+
+instance ToFormUrlEncoded ReqGetUserInfo where
+    toFormUrlEncoded ReqGetUserInfo{..} = [
+          ( "access_token" , toText reqGetUserInfoAccessToken )
+        , ( "user_id"      , toText reqGetUserInfoUserId      )
         ]
 
 {-------------------------------------------------------------------------------
@@ -120,6 +138,22 @@ data RespLogin = RespLogin {
     }
   deriving (Show)
 
+data RespGetUserInfo = RespGetUserInfo {
+      respGetUserInfoName                     :: String
+    , respGetUserInfoUsername                 :: String
+    , respGetUserInfoAvatarUrl                :: Maybe URI
+    , respGetUserInfoBio                      :: String
+    , respGetUserInfoUseTraditionalCharacters :: Bool
+    , respGetUserInfoUserId                   :: UserId
+    , respGetUserInfoNewLessonNotification    :: Bool
+    , respGetUserInfoNewShowNotification      :: Bool
+    , respGetUserInfoNewsletterNotification   :: Bool
+    , respGetUserInfoGeneralNotification      :: Bool
+    , respGetUserInfoLevel                    :: Level
+    , respGetUserInfoType                     :: Undocumented String
+    }
+  deriving (Show)
+
 instance FromJSON RespLogin where
     parseJSON = withObject "RespLogin" $ \obj -> do
       respLoginAccessToken                    <- obj .: "access_token"
@@ -140,6 +174,22 @@ instance FromJSON RespLogin where
       respLoginSubscribedLessons              <- obj .: "subscribed_lessons"
       respLoginStudiedLessons                 <- obj .: "studied_lessons"
       return RespLogin{..}
+
+instance FromJSON RespGetUserInfo where
+    parseJSON = withObject "RespGetUserInfo" $ \obj -> do
+      respGetUserInfoName                           <- obj .:  "name"
+      respGetUserInfoUsername                       <- obj .:  "username"
+      Stringy respGetUserInfoAvatarUrl              <- obj .:  "avatar_url"
+      respGetUserInfoBio                            <- obj .:  "bio"
+      Nummy respGetUserInfoUseTraditionalCharacters <- obj .:  "use_traditional_characters"
+      Nummy respGetUserInfoUserId                   <- obj .:  "user_id"
+      Nummy respGetUserInfoNewLessonNotification    <- obj .:  "new_lesson_notification"
+      Nummy respGetUserInfoNewShowNotification      <- obj .:  "new_show_notification"
+      Nummy respGetUserInfoNewsletterNotification   <- obj .:  "newsletter_notification"
+      Nummy respGetUserInfoGeneralNotification      <- obj .:  "general_notification"
+      respGetUserInfoLevel                          <- obj .:  "level"
+      respGetUserInfoType                           <- obj .:? "type"
+      return RespGetUserInfo{..}
 
 {-------------------------------------------------------------------------------
   ChinesePod specific datatypes
@@ -162,6 +212,26 @@ instance FromJSON OK where
         "OK" -> return OK
         _    -> fail $ "Expected OK"
 
+-- | User level
+data Level =
+    LevelNotSpecified
+  | LevelNewbie
+  | LevelElementary
+  | LevelIntermediate
+  | LevelUpperIntermediate
+  | LevelAdvanced
+  deriving (Show)
+
+instance FromJSON Level where
+     parseJSON = withInt "Level" $ \case
+       0 -> return LevelNotSpecified
+       1 -> return LevelNewbie
+       2 -> return LevelElementary
+       3 -> return LevelIntermediate
+       4 -> return LevelUpperIntermediate
+       5 -> return LevelAdvanced
+       i -> fail $ "Could not parse user level " ++ show i
+
 {-------------------------------------------------------------------------------
   Many requests need information that got returned in the initial login
 -------------------------------------------------------------------------------}
@@ -173,6 +243,12 @@ instance FromLogin ReqLogout where
     fromLogin RespLogin{..} = ReqLogout {
         reqLogoutAccessToken = respLoginAccessToken
       , reqLogoutUserId      = respLoginUserId
+      }
+
+instance FromLogin ReqGetUserInfo where
+    fromLogin RespLogin{..} = ReqGetUserInfo {
+        reqGetUserInfoAccessToken = respLoginAccessToken
+      , reqGetUserInfoUserId      = respLoginUserId
       }
 
 {-------------------------------------------------------------------------------
@@ -192,11 +268,33 @@ instance FromJSON (Stringy (Maybe URI)) where
     parseJSON = withText "URI" $ return . Stringy . parseURI . T.unpack
 
 instance FromJSON (Stringy Bool) where
-    parseJSON = withText "Bool" $ \txt ->
-      case txt of
-        "0" -> return $ Stringy False
-        "1" -> return $ Stringy True
-        _   -> fail $ "Could not parse bool " ++ show txt
+    parseJSON = withText "Bool" $ \case
+      "0" -> return $ Stringy False
+      "1" -> return $ Stringy True
+      txt -> fail $ "Could not parse bool " ++ show txt
+
+-- | Value encoded in JSON as a number
+--
+-- Like 'Stringy', but using numbers instead.
+newtype Nummy a = Nummy a
+
+instance FromJSON (Nummy Bool) where
+    parseJSON = withInt "Bool" $ \case
+      0 -> return $ Nummy False
+      1 -> return $ Nummy True
+      i -> fail $ "Could not parse bool " ++ show i
+
+instance FromJSON (Nummy UserId) where
+    parseJSON = withInt "UserId" $ return . Nummy . UserId . show
+
+-- | Some requests return more info than is documented in the API
+--
+-- Since we should not rely on these fields being set, we mark them.
+type Undocumented = Maybe
+
+{-------------------------------------------------------------------------------
+  Auxiliary aeson
+-------------------------------------------------------------------------------}
 
 tryRead :: forall a. (Typeable a, Read a) => Text -> Parser a
 tryRead strA =
@@ -207,3 +305,6 @@ tryRead strA =
    where
       fullParse :: (a, String) -> Bool
       fullParse = null . snd
+
+withInt :: String -> (Int -> Parser a) -> Value -> Parser a
+withInt expected f = withScientific expected $ f . round
