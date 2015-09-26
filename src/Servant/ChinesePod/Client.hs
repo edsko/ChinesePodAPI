@@ -11,15 +11,19 @@ module Servant.ChinesePod.Client (
 
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Either (EitherT(..))
+import Servant.API
 import Servant.Client
 
 import Servant.ChinesePod.API
 
 data ChinesePodAPI = ChinesePodAPI {
-    cpodLogin :: Client Login
+    cpodLogin  :: Client Login
+  , cpodLogout :: Client Logout
   }
 
 chinesePodAPI :: BaseUrl -> ChinesePodAPI
-chinesePodAPI baseUrl =
-    let ( cpodLogin ) = client api baseUrl
-    in ChinesePodAPI{..}
+chinesePodAPI baseUrl = ChinesePodAPI{..}
+  where
+    (     cpodLogin
+     :<|> cpodLogout
+     ) = client api baseUrl

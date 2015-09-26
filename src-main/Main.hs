@@ -9,6 +9,8 @@ client :: ChinesePodAPI -> ReqLogin -> EitherT ServantError IO ()
 client ChinesePodAPI{..} reqLogin = do
     respLogin <- cpodLogin reqLogin
     liftIO $ print respLogin
+    respLogout <- cpodLogout (fromLogin respLogin)
+    liftIO $ print respLogout
 
 main :: IO ()
 main = do

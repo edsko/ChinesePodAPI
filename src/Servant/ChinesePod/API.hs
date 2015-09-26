@@ -6,11 +6,17 @@ module Servant.ChinesePod.API (
   , Services
   , Account
   , Login
+  , Logout
     -- * Request types
   , ReqLogin(..)
   , ReqSignature(..)
     -- * Response types
   , RespLogin(..)
+    -- * Constructing requests from previous responses
+  , FromLogin(..)
+    -- * ChinesePod specific datatypes
+  , AccessToken(..)
+  , UserId(..)
   ) where
 
 import Control.Monad
@@ -22,6 +28,7 @@ import Data.Text (Text)
 import Data.Typeable
 import Network.URI
 import Servant.API
+import qualified Data.ByteString      as BS
 import qualified Data.ByteString.UTF8 as BS.UTF8
 import qualified Data.Text            as T
 
@@ -36,9 +43,11 @@ type ChinesePod = "api" :> "0.6" :> Services
 
 type Services = "account" :> Account
 
-type Account = "login" :> Login
+type Account = "login"  :> Login
+          :<|> "logout" :> Logout
 
-type Login = ReqBody '[FormUrlEncoded] ReqLogin :> Post '[JSON] RespLogin
+type Login  = ReqBody '[FormUrlEncoded] ReqLogin  :> Post '[JSON] RespLogin
+type Logout = ReqBody '[FormUrlEncoded] ReqLogout :> Post '[JSON] OK
 
 {-------------------------------------------------------------------------------
   Request types
@@ -57,29 +66,42 @@ data ReqSignature = ReqSignature {
     }
   deriving (Show)
 
-sign :: ReqSignature -> Digest SHA1
-sign ReqSignature{..} = hash $ BS.UTF8.fromString $ concat [
-      reqSignatureClientSecret
-    , reqSignatureUserPassword
-    ]
+data ReqLogout = ReqLogout {
+      reqLogoutAccessToken :: AccessToken
+    , reqLogoutUserId      :: UserId
+    }
+
+-- | The 'ToText' instance for 'ReqSignature' is the hash
+instance ToText ReqSignature where
+    toText ReqSignature{..} =
+        toText . show . sha1 . BS.UTF8.fromString $ concat [
+            reqSignatureClientSecret
+          , reqSignatureUserPassword
+          ]
+      where
+        sha1 :: BS.ByteString -> Digest SHA1
+        sha1 = hash
 
 instance ToFormUrlEncoded ReqLogin where
     toFormUrlEncoded ReqLogin{..} = [
-          ( "client_id" , T.pack reqLoginClientId )
-        , ( "email"     , T.pack reqLoginEmail    )
-        , ( "signature" , sign' reqLoginSignature )
+          ( "client_id" , toText reqLoginClientId  )
+        , ( "email"     , toText reqLoginEmail     )
+        , ( "signature" , toText reqLoginSignature )
         ]
-      where
-        sign' :: ReqSignature -> Text
-        sign' = T.pack . show . sign
+
+instance ToFormUrlEncoded ReqLogout where
+    toFormUrlEncoded ReqLogout{..} = [
+          ( "access_token" , toText reqLogoutAccessToken )
+        , ( "user_id"      , toText reqLogoutUserId      )
+        ]
 
 {-------------------------------------------------------------------------------
   Response types
 -------------------------------------------------------------------------------}
 
 data RespLogin = RespLogin {
-      respLoginAccessToken            :: String
-    , respLoginUserId                 :: String
+      respLoginAccessToken            :: AccessToken
+    , respLoginUserId                 :: UserId
     , respLoginUsername               :: String
     , respLoginName                   :: String
     , respLoginSelfStudyLessonsTotal  :: Int
@@ -118,6 +140,40 @@ instance FromJSON RespLogin where
       respLoginSubscribedLessons              <- obj .: "subscribed_lessons"
       respLoginStudiedLessons                 <- obj .: "studied_lessons"
       return RespLogin{..}
+
+{-------------------------------------------------------------------------------
+  ChinesePod specific datatypes
+-------------------------------------------------------------------------------}
+
+newtype UserId = UserId String
+  deriving (Show, FromJSON, ToText)
+
+newtype AccessToken = AccessToken String
+  deriving (Show, FromJSON, ToText)
+
+-- | Some ChinesePod requests simply return OK
+data OK = OK
+  deriving (Show)
+
+instance FromJSON OK where
+    parseJSON = withObject "OK" $ \obj -> do
+      result <- obj .: "result"
+      case result :: String of
+        "OK" -> return OK
+        _    -> fail $ "Expected OK"
+
+{-------------------------------------------------------------------------------
+  Many requests need information that got returned in the initial login
+-------------------------------------------------------------------------------}
+
+class FromLogin a where
+    fromLogin :: RespLogin -> a
+
+instance FromLogin ReqLogout where
+    fromLogin RespLogin{..} = ReqLogout {
+        reqLogoutAccessToken = respLoginAccessToken
+      , reqLogoutUserId      = respLoginUserId
+      }
 
 {-------------------------------------------------------------------------------
   Auxiliary
