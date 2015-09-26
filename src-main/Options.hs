@@ -23,6 +23,7 @@ data Options = Options {
 
 data Command =
     CommandSearch OptionsSearch
+  | CommandLatest OptionsLatest
   deriving (Show)
 
 data OptionsSearch = OptionsSearch {
@@ -30,6 +31,14 @@ data OptionsSearch = OptionsSearch {
     , optionsSearchNumResults  :: Maybe Int
     , optionsSearchPage        :: Maybe Int
     , optionsSearchSearch      :: String
+    }
+  deriving (Show)
+
+data OptionsLatest = OptionsLatest {
+      optionsLatestPage    :: Maybe Int
+    , optionsLatestCount   :: Maybe Int
+    , optionsLatestLang    :: Maybe String
+    , optionsLatestLevelId :: Maybe Level
     }
   deriving (Show)
 
@@ -45,6 +54,16 @@ instance FromLogin ReqSearchLessons OptionsSearch where
       , reqSearchLessonsSearchLevel = optionsSearchSearchLevel
       , reqSearchLessonsNumResults  = optionsSearchNumResults
       , reqSearchLessonsPage        = optionsSearchPage
+      }
+
+instance FromLogin ReqGetLatestLessons OptionsLatest where
+    fromLogin RespLogin{..} OptionsLatest{..} = ReqGetLatestLessons {
+        reqGetLatestLessonsAccessToken = respLoginAccessToken
+      , reqGetLatestLessonsUserId      = respLoginUserId
+      , reqGetLatestLessonsPage        = optionsLatestPage
+      , reqGetLatestLessonsCount       = optionsLatestCount
+      , reqGetLatestLessonsLang        = optionsLatestLang
+      , reqGetLatestLessonsLevelId     = optionsLatestLevelId
       }
 
 {-------------------------------------------------------------------------------
@@ -67,13 +86,17 @@ parseOptions = Options
             command "search" $
               info (helper <*> (CommandSearch <$> parseOptionsSearch))
                    (progDesc "Search for lessons")
+          , command "latest" $
+              info (helper <*> (CommandLatest <$> parseOptionsLatest))
+                   (progDesc "Get the list of the latest lessons")
           ])
 
 parseOptionsSearch :: Parser OptionsSearch
 parseOptionsSearch = OptionsSearch
-    <$> (optional . option (str >>= autoFromText) $ mconcat [
+    <$> (option (str >>= fmap strOrInt . autoFromText) $ mconcat [
             long "level"
           , help "Limit search to a specific level"
+          , value Nothing
           ])
     <*> (optional . option auto $ mconcat [
             long "num-results"
@@ -84,6 +107,26 @@ parseOptionsSearch = OptionsSearch
           , help "Page number"
           ])
     <*> argument str (metavar "KEYWORD")
+
+parseOptionsLatest :: Parser OptionsLatest
+parseOptionsLatest = OptionsLatest
+    <$> (optional . option auto $ mconcat [
+            long "page"
+          , help "Page number"
+          ])
+    <*> (optional . option auto $ mconcat [
+            long "count"
+          , help "Number of lessons per page"
+          ])
+    <*> (optional . strOption $ mconcat [
+            long "lang"
+          , help "Language local settings"
+          ])
+    <*> (option (str >>= fmap strOrInt . autoFromText) $ mconcat [
+            long "level"
+          , help "Level"
+          , value Nothing
+          ])
 
 parseReqLogin :: Parser ReqLogin
 parseReqLogin = ReqLogin
@@ -133,7 +176,7 @@ readBaseUrl strURI =
             let host = uriRegName auth
             port <- case uriPort auth of
               ""         -> return 80
-              ':':port   -> autoRead port
+              ':':port   -> autoFromRead port
               _otherwise -> fail $ "Unexpected port " ++ show (uriPort auth)
             return (host, port)
           Nothing ->
@@ -142,19 +185,14 @@ readBaseUrl strURI =
       Nothing ->
         fail $ "Could not parse URI"
 
+autoFromRead :: forall a. (Read a, Typeable a) => String -> ReadM a
+autoFromRead strA =
+    case tryRead strA of
+      Just a  -> return a
+      Nothing -> parseFailure (T.pack strA)
+
 autoFromText :: forall a. (FromText a, Typeable a) => String -> ReadM a
 autoFromText strA =
     case fromText (T.pack strA) of
       Just a  -> return a
-      Nothing -> fail $ "Could not parse " ++ show strA
-                     ++ "as " ++ show (typeOf (undefined :: a))
-
-autoRead :: forall a. (Typeable a, Read a) => String -> ReadM a
-autoRead strA =
-     case filter fullParse (readsPrec 0 strA) of
-       [(a, _)]   -> return a
-       _otherwise -> fail $ "Could not parse " ++ show strA ++ " "
-                         ++ "as " ++ show (typeOf (undefined :: a))
-   where
-     fullParse :: (a, String) -> Bool
-     fullParse = null . snd
+      Nothing -> parseFailure (T.pack strA)

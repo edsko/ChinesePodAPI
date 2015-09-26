@@ -17,10 +17,11 @@ import Servant.Client
 import Servant.ChinesePod.API
 
 data ChinesePodAPI = ChinesePodAPI {
-    cpodLogin         :: Client Login
-  , cpodLogout        :: Client Logout
-  , cpodGetUserInfo   :: Client GetUserInfo
-  , cpodSearchLessons :: Client SearchLessons
+    cpodLogin            :: Client Login
+  , cpodLogout           :: Client Logout
+  , cpodGetUserInfo      :: Client GetUserInfo
+  , cpodGetLatestLessons :: Client GetLatestLessons
+  , cpodSearchLessons    :: Client SearchLessons
   }
 
 chinesePodAPI :: BaseUrl -> ChinesePodAPI
@@ -30,6 +31,7 @@ chinesePodAPI baseUrl = ChinesePodAPI{..}
           :<|> cpodLogout
           :<|> cpodGetUserInfo
           )
-     :<|> (    cpodSearchLessons
+     :<|> (    cpodGetLatestLessons
+          :<|> cpodSearchLessons
           )
      ) = client api baseUrl

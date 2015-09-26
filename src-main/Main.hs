@@ -9,9 +9,12 @@ exec :: ChinesePodAPI -> RespLogin -> Command -> EitherT ServantError IO ()
 exec ChinesePodAPI{..} respLogin = go
   where
     go :: Command -> EitherT ServantError IO ()
-    go (CommandSearch optsSearch) = do
-      respSearchLessons <- cpodSearchLessons $ fromLogin respLogin optsSearch
+    go (CommandSearch opts) = do
+      respSearchLessons <- cpodSearchLessons $ fromLogin respLogin opts
       liftIO $ print respSearchLessons
+    go (CommandLatest opts) = do
+      respGetLatestLessons <- cpodGetLatestLessons $ fromLogin respLogin opts
+      liftIO $ print respGetLatestLessons
 
 client :: ChinesePodAPI -> ReqLogin -> Command -> EitherT ServantError IO ()
 client cpodAPI@ChinesePodAPI{..} reqLogin cmd = do
