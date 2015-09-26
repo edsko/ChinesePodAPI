@@ -1,20 +1,51 @@
 module Options (
-    Options(..)
+    Command(..)
+  , Options(..)
+  , OptionsSearch(..)
   , getOptions
   ) where
 
 import Data.Typeable
 import Options.Applicative
 import Network.URI
+import qualified Data.Text as T
 
+import Servant.API
 import Servant.ChinesePod.API
 import Servant.ChinesePod.Client
 
 data Options = Options {
       optionsReqLogin :: ReqLogin
     , optionsBaseUrl  :: BaseUrl
+    , optionsCommand  :: Command
     }
-  deriving Show
+  deriving (Show)
+
+data Command =
+    CommandSearch OptionsSearch
+  deriving (Show)
+
+data OptionsSearch = OptionsSearch {
+      optionsSearchSearchLevel :: Maybe Level
+    , optionsSearchNumResults  :: Maybe Int
+    , optionsSearchPage        :: Maybe Int
+    , optionsSearchSearch      :: String
+    }
+  deriving (Show)
+
+{-------------------------------------------------------------------------------
+  Constructing requests
+-------------------------------------------------------------------------------}
+
+instance FromLogin ReqSearchLessons OptionsSearch where
+    fromLogin RespLogin{..} OptionsSearch{..} = ReqSearchLessons {
+        reqSearchLessonsAccessToken = respLoginAccessToken
+      , reqSearchLessonsUserId      = respLoginUserId
+      , reqSearchLessonsSearch      = optionsSearchSearch
+      , reqSearchLessonsSearchLevel = optionsSearchSearchLevel
+      , reqSearchLessonsNumResults  = optionsSearchNumResults
+      , reqSearchLessonsPage        = optionsSearchPage
+      }
 
 {-------------------------------------------------------------------------------
   Parser
@@ -32,6 +63,27 @@ parseOptions :: Parser Options
 parseOptions = Options
     <$> parseReqLogin
     <*> parseBaseUrl
+    <*> (subparser $ mconcat [
+            command "search" $
+              info (helper <*> (CommandSearch <$> parseOptionsSearch))
+                   (progDesc "Search for lessons")
+          ])
+
+parseOptionsSearch :: Parser OptionsSearch
+parseOptionsSearch = OptionsSearch
+    <$> (optional . option (str >>= autoFromText) $ mconcat [
+            long "level"
+          , help "Limit search to a specific level"
+          ])
+    <*> (optional . option auto $ mconcat [
+            long "num-results"
+          , help "Number of results"
+          ])
+    <*> (optional . option auto $ mconcat [
+            long "page"
+          , help "Page number"
+          ])
+    <*> argument str (metavar "KEYWORD")
 
 parseReqLogin :: Parser ReqLogin
 parseReqLogin = ReqLogin
@@ -69,8 +121,8 @@ parseBaseUrl = option (str >>= readBaseUrl) $ mconcat [
     ]
 
 readBaseUrl :: String -> ReadM BaseUrl
-readBaseUrl uriStr =
-    case parseURI uriStr of
+readBaseUrl strURI =
+    case parseURI strURI of
       Just uri -> do
         baseUrlScheme <- case uriScheme uri of
           "http:"    -> return Http
@@ -81,7 +133,7 @@ readBaseUrl uriStr =
             let host = uriRegName auth
             port <- case uriPort auth of
               ""         -> return 80
-              ':':port   -> tryRead port
+              ':':port   -> autoRead port
               _otherwise -> fail $ "Unexpected port " ++ show (uriPort auth)
             return (host, port)
           Nothing ->
@@ -90,12 +142,19 @@ readBaseUrl uriStr =
       Nothing ->
         fail $ "Could not parse URI"
 
-tryRead :: forall a. (Typeable a, Read a) => String -> ReadM a
-tryRead strA =
+autoFromText :: forall a. (FromText a, Typeable a) => String -> ReadM a
+autoFromText strA =
+    case fromText (T.pack strA) of
+      Just a  -> return a
+      Nothing -> fail $ "Could not parse " ++ show strA
+                     ++ "as " ++ show (typeOf (undefined :: a))
+
+autoRead :: forall a. (Typeable a, Read a) => String -> ReadM a
+autoRead strA =
      case filter fullParse (readsPrec 0 strA) of
        [(a, _)]   -> return a
        _otherwise -> fail $ "Could not parse " ++ show strA ++ " "
                          ++ "as " ++ show (typeOf (undefined :: a))
    where
-      fullParse :: (a, String) -> Bool
-      fullParse = null . snd
+     fullParse :: (a, String) -> Bool
+     fullParse = null . snd

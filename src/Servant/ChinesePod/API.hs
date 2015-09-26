@@ -5,29 +5,40 @@ module Servant.ChinesePod.API (
   , ChinesePod
   , Services
   , Account
+  , Library
+    -- ** Account
   , Login
   , Logout
   , GetUserInfo
+    -- ** Library
+  , SearchLessons
     -- * Request types
   , ReqLogin(..)
   , ReqSignature(..)
+  , ReqSearchLessons(..)
     -- * Response types
   , RespLogin(..)
+  , RespSearchLessons
     -- * Constructing requests from previous responses
   , FromLogin(..)
     -- * Auxiliary dataypes used to define the API
   , OK(..)
   , Undocumented
+  , SearchResults(..)
     -- * ChinesePod specific datatypes
   , AccessToken(..)
   , UserId(..)
   , Level(..)
+  , Lesson(..)
   ) where
 
 import Control.Monad
 import Crypto.Hash
 import Data.Aeson
 import Data.Aeson.Types
+import Data.List
+import Data.Maybe (catMaybes)
+import Data.Ord
 import Data.Proxy
 import Data.Text (Text)
 import Data.Typeable
@@ -35,6 +46,7 @@ import Network.URI
 import Servant.API
 import qualified Data.ByteString      as BS
 import qualified Data.ByteString.UTF8 as BS.UTF8
+import qualified Data.HashMap.Strict  as HashMap
 import qualified Data.Text            as T
 
 api :: Proxy ChinesePod
@@ -47,6 +59,7 @@ api = Proxy
 type ChinesePod = "api" :> "0.6" :> Services
 
 type Services = "account" :> Account
+           :<|> "library" :> Library
 
 type Account = "login"         :> Login
           :<|> "logout"        :> Logout
@@ -55,6 +68,10 @@ type Account = "login"         :> Login
 type Login       = ReqBody '[FormUrlEncoded] ReqLogin       :> Post '[JSON] RespLogin
 type Logout      = ReqBody '[FormUrlEncoded] ReqLogout      :> Post '[JSON] OK
 type GetUserInfo = ReqBody '[FormUrlEncoded] ReqGetUserInfo :> Post '[JSON] RespGetUserInfo
+
+type Library = "search-lessons" :> SearchLessons
+
+type SearchLessons = ReqBody '[FormUrlEncoded] ReqSearchLessons :> Post '[JSON] RespSearchLessons
 
 {-------------------------------------------------------------------------------
   Request types
@@ -77,11 +94,23 @@ data ReqLogout = ReqLogout {
       reqLogoutAccessToken :: AccessToken
     , reqLogoutUserId      :: UserId
     }
+  deriving (Show)
 
 data ReqGetUserInfo = ReqGetUserInfo {
       reqGetUserInfoAccessToken :: AccessToken
     , reqGetUserInfoUserId      :: UserId
     }
+  deriving (Show)
+
+data ReqSearchLessons = ReqSearchLessons {
+      reqSearchLessonsAccessToken :: AccessToken
+    , reqSearchLessonsUserId      :: UserId
+    , reqSearchLessonsSearch      :: String
+    , reqSearchLessonsSearchLevel :: Maybe Level
+    , reqSearchLessonsNumResults  :: Maybe Int
+    , reqSearchLessonsPage        :: Maybe Int
+    }
+  deriving (Show)
 
 -- | The 'ToText' instance for 'ReqSignature' is the hash
 instance ToText ReqSignature where
@@ -112,6 +141,23 @@ instance ToFormUrlEncoded ReqGetUserInfo where
           ( "access_token" , toText reqGetUserInfoAccessToken )
         , ( "user_id"      , toText reqGetUserInfoUserId      )
         ]
+
+instance ToFormUrlEncoded ReqSearchLessons where
+    toFormUrlEncoded ReqSearchLessons{..} = [
+          ( "access_token" , toText reqSearchLessonsAccessToken )
+        , ( "user_id"      , toText reqSearchLessonsUserId      )
+        , ( "search"       , toText reqSearchLessonsSearch      )
+        ] ++ catMaybes [
+          optFormArg "search_level" (toOptText . Stringy) reqSearchLessonsSearchLevel
+        , optFormArg "num_results"  (Just . toText)       reqSearchLessonsNumResults
+        , optFormArg "page"         (Just . toText)       reqSearchLessonsPage
+        ]
+
+optFormArg :: Text -> (a -> Maybe Text) -> Maybe a -> Maybe (Text, Text)
+optFormArg nm f ma = do
+   a   <- ma
+   val <- f a
+   return (nm, val)
 
 {-------------------------------------------------------------------------------
   Response types
@@ -154,6 +200,8 @@ data RespGetUserInfo = RespGetUserInfo {
     }
   deriving (Show)
 
+type RespSearchLessons = SearchResults Lesson
+
 instance FromJSON RespLogin where
     parseJSON = withObject "RespLogin" $ \obj -> do
       respLoginAccessToken                    <- obj .: "access_token"
@@ -187,7 +235,7 @@ instance FromJSON RespGetUserInfo where
       Nummy respGetUserInfoNewShowNotification      <- obj .:  "new_show_notification"
       Nummy respGetUserInfoNewsletterNotification   <- obj .:  "newsletter_notification"
       Nummy respGetUserInfoGeneralNotification      <- obj .:  "general_notification"
-      respGetUserInfoLevel                          <- obj .:  "level"
+      Nummy respGetUserInfoLevel                    <- obj .:  "level"
       respGetUserInfoType                           <- obj .:? "type"
       return RespGetUserInfo{..}
 
@@ -222,37 +270,62 @@ data Level =
   | LevelAdvanced
   deriving (Show)
 
-instance FromJSON Level where
-     parseJSON = withInt "Level" $ \case
-       0 -> return LevelNotSpecified
-       1 -> return LevelNewbie
-       2 -> return LevelElementary
-       3 -> return LevelIntermediate
-       4 -> return LevelUpperIntermediate
-       5 -> return LevelAdvanced
-       i -> fail $ "Could not parse user level " ++ show i
+-- | Some requests return more info than is documented in the API
+--
+-- Since we should not rely on these fields being set, we mark them.
+type Undocumented = Maybe
+
+data Lesson = Lesson {
+      lessonV3Id                 :: String
+    , lessonTitle                :: String
+    , lessonIntroduction         :: String
+    , lessonLevel                :: Level
+    , lessonName                 :: String
+    , lessonSlug                 :: String
+    , lessonLessonId             :: Maybe String
+    , lessonPublicationTimestamp :: String
+    , lessonImage                :: Maybe URI
+    , lessonBookMarked           :: Bool
+    , lessonMarkAsStudied        :: Bool
+    }
+  deriving (Show)
+
+instance FromJSON Lesson where
+    parseJSON = withObject "Lesson" $ \obj -> do
+      lessonV3Id                 <- obj .:  "v3_id"
+      lessonTitle                <- obj .:  "title"
+      lessonIntroduction         <- obj .:  "introduction"
+      Stringy lessonLevel        <- obj .:  "level"
+      lessonName                 <- obj .:  "name"
+      lessonSlug                 <- obj .:  "slug"
+      Nullable lessonLessonId    <- obj .:? "lesson_id" .!= Nullable Nothing
+      lessonPublicationTimestamp <- obj .:  "publication_timestamp"
+      Stringy lessonImage        <- obj .:  "image"
+      Nummy lessonBookMarked     <- obj .:  "book_marked"
+      Nummy lessonMarkAsStudied  <- obj .:  "mark_as_studied"
+      return Lesson{..}
 
 {-------------------------------------------------------------------------------
   Many requests need information that got returned in the initial login
 -------------------------------------------------------------------------------}
 
-class FromLogin a where
-    fromLogin :: RespLogin -> a
+class FromLogin a b where
+    fromLogin :: RespLogin -> b -> a
 
-instance FromLogin ReqLogout where
-    fromLogin RespLogin{..} = ReqLogout {
+instance FromLogin ReqLogout () where
+    fromLogin RespLogin{..} () = ReqLogout {
         reqLogoutAccessToken = respLoginAccessToken
       , reqLogoutUserId      = respLoginUserId
       }
 
-instance FromLogin ReqGetUserInfo where
-    fromLogin RespLogin{..} = ReqGetUserInfo {
+instance FromLogin ReqGetUserInfo () where
+    fromLogin RespLogin{..} () = ReqGetUserInfo {
         reqGetUserInfoAccessToken = respLoginAccessToken
       , reqGetUserInfoUserId      = respLoginUserId
       }
 
 {-------------------------------------------------------------------------------
-  Auxiliary
+  String-encoded types
 -------------------------------------------------------------------------------}
 
 -- | Value encoded in JSON as a string
@@ -273,6 +346,36 @@ instance FromJSON (Stringy Bool) where
       "1" -> return $ Stringy True
       txt -> fail $ "Could not parse bool " ++ show txt
 
+instance ToOptText (Stringy Level) where
+    toOptText (Stringy level) = go level
+      where
+        go :: Level -> Maybe Text
+        go LevelNotSpecified      = Nothing
+        go LevelNewbie            = Just "Newbie"
+        go LevelElementary        = Just "Elementary"
+        go LevelIntermediate      = Just "Intermediate"
+        go LevelUpperIntermediate = Just "Upper Intermediate"
+        go LevelAdvanced          = Just "Advanced"
+
+instance FromText Level where
+     fromText = \case
+       "Newbie"             -> Just LevelNewbie
+       "Elementary"         -> Just LevelElementary
+       "Intermediate"       -> Just LevelIntermediate
+       "Upper Intermediate" -> Just LevelUpperIntermediate
+       "Advanced"           -> Just LevelAdvanced
+       _otherwise           -> Nothing
+
+instance FromJSON (Stringy Level) where
+     parseJSON = withText "Level" $ \txt ->
+       case fromText txt of
+         Just level -> return $ Stringy level
+         Nothing    -> fail $ "Could not parse level " ++ show txt
+
+{-------------------------------------------------------------------------------
+  Number-encoded types
+-------------------------------------------------------------------------------}
+
 -- | Value encoded in JSON as a number
 --
 -- Like 'Stringy', but using numbers instead.
@@ -287,10 +390,32 @@ instance FromJSON (Nummy Bool) where
 instance FromJSON (Nummy UserId) where
     parseJSON = withInt "UserId" $ return . Nummy . UserId . show
 
--- | Some requests return more info than is documented in the API
---
--- Since we should not rely on these fields being set, we mark them.
-type Undocumented = Maybe
+instance FromJSON (Nummy Level) where
+     parseJSON = withInt "Level" $ \case
+       0 -> return $ Nummy LevelNotSpecified
+       1 -> return $ Nummy LevelNewbie
+       2 -> return $ Nummy LevelElementary
+       3 -> return $ Nummy LevelIntermediate
+       4 -> return $ Nummy LevelUpperIntermediate
+       5 -> return $ Nummy LevelAdvanced
+       i -> fail $ "Could not parse user level " ++ show i
+
+{-------------------------------------------------------------------------------
+  Nullable fields (fields whose absence is represented with an explicit 'null')
+-------------------------------------------------------------------------------}
+
+newtype Nullable a = Nullable (Maybe a)
+
+instance FromJSON a => FromJSON (Nullable a) where
+    parseJSON Null = return $ Nullable Nothing
+    parseJSON val  = Nullable . Just <$> parseJSON val
+
+{-------------------------------------------------------------------------------
+  Some values are represented by their absence
+-------------------------------------------------------------------------------}
+
+class ToOptText a where
+  toOptText :: a -> Maybe Text
 
 {-------------------------------------------------------------------------------
   Auxiliary aeson
@@ -308,3 +433,26 @@ tryRead strA =
 
 withInt :: String -> (Int -> Parser a) -> Value -> Parser a
 withInt expected f = withScientific expected $ f . round
+
+{-------------------------------------------------------------------------------
+  Generic search results
+-------------------------------------------------------------------------------}
+
+data SearchResults a = SearchResults {
+      searchResults      :: [a]
+    , searchResultsTotal :: Int
+    }
+  deriving (Show)
+
+instance FromJSON a => FromJSON (SearchResults a) where
+    parseJSON = withObject "SearchResults" $ \obj -> do
+        let rawResults = catMaybes $ map extractRaw (HashMap.toList obj)
+        searchResults      <- mapM parseJSON (sortRaw rawResults)
+        searchResultsTotal <- obj .: "total"
+        return SearchResults{..}
+      where
+        extractRaw :: (Text, Value) -> Maybe (Int, Value)
+        extractRaw (idx, val) = do idx' <- fromText idx ; return (idx', val)
+
+        sortRaw :: [(Int, Value)] -> [Value]
+        sortRaw = map snd . sortBy (comparing fst)

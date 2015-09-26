@@ -19,6 +19,7 @@ library
   build-depends:         base >=4.8 && <4.9
                        , aeson
                        , bytestring
+                       , containers
                        , cryptohash
                        , either
                        , network-uri
@@ -26,6 +27,7 @@ library
                        , servant-client
                        , text
                        , transformers
+                       , unordered-containers
                        , utf8-string
   hs-source-dirs:      src
   default-language:    Haskell2010
@@ -47,8 +49,11 @@ executable cpod-query
                        , ChinesePodAPI
                        , network-uri
                        , optparse-applicative
+                       , servant
+                       , text
   hs-source-dirs:      src-main
   default-language:    Haskell2010
   default-extensions:  RecordWildCards
                        ScopedTypeVariables
+                       MultiParamTypeClasses
   ghc-options:         -Wall

@@ -5,20 +5,26 @@ import Servant.ChinesePod.Client
 
 import Options
 
-client :: ChinesePodAPI -> ReqLogin -> EitherT ServantError IO ()
-client ChinesePodAPI{..} reqLogin = do
+exec :: ChinesePodAPI -> RespLogin -> Command -> EitherT ServantError IO ()
+exec ChinesePodAPI{..} respLogin = go
+  where
+    go :: Command -> EitherT ServantError IO ()
+    go (CommandSearch optsSearch) = do
+      respSearchLessons <- cpodSearchLessons $ fromLogin respLogin optsSearch
+      liftIO $ print respSearchLessons
+
+client :: ChinesePodAPI -> ReqLogin -> Command -> EitherT ServantError IO ()
+client cpodAPI@ChinesePodAPI{..} reqLogin cmd = do
     respLogin <- cpodLogin reqLogin
-    liftIO $ print respLogin
-    respGetUserInfo <- cpodGetUserInfo (fromLogin respLogin)
-    liftIO $ print respGetUserInfo
-    respLogout <- cpodLogout (fromLogin respLogin)
-    liftIO $ print respLogout
+    exec cpodAPI respLogin cmd
+    OK <- cpodLogout $ fromLogin respLogin ()
+    return ()
 
 main :: IO ()
 main = do
     Options{..} <- getOptions
     let cpodAPI = chinesePodAPI optionsBaseUrl
-    mRes <- runEitherT $ client cpodAPI optionsReqLogin
+    mRes <- runEitherT $ client cpodAPI optionsReqLogin optionsCommand
     case mRes of
-      Left  err -> putStrLn $ "Error: " ++ show err
+      Left  err -> print err
       Right ()  -> return ()
