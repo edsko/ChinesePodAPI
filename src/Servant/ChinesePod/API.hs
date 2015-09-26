@@ -172,7 +172,7 @@ data RespGetUserInfo = RespGetUserInfo {
   deriving (Show)
 
 type RespSearchLessons    = SearchResults Lesson
-type RespGetLatestLessons = SearchResults Value
+type RespGetLatestLessons = SearchResults Lesson
 
 {-------------------------------------------------------------------------------
   Encoding requests
@@ -310,6 +310,11 @@ data Lesson = Lesson {
     , lessonImage                :: String
     , lessonBookMarked           :: Bool
     , lessonMarkAsStudied        :: Bool
+    , lessonSource               :: Maybe String
+    , lessonStatus               :: Maybe String
+    , lessonRadioQualityMp3      :: Maybe String
+    , lessonDialogueMp3          :: Maybe String
+    , lessonReviewMp3            :: Maybe String
     }
   deriving (Show)
 
@@ -337,6 +342,11 @@ instance FromJSON Lesson where
       lessonImage                <-              obj .:  "image"
       lessonBookMarked           <- strOrInt <$> obj .:  "book_marked"
       lessonMarkAsStudied        <- strOrInt <$> obj .:  "mark_as_studied"
+      lessonSource               <- nullable <$> obj .:? "source" .!= Nullable Nothing
+      lessonStatus               <-              obj .:? "status"
+      lessonRadioQualityMp3      <-              obj .:? "radio_quality_mp3"
+      lessonDialogueMp3          <-              obj .:? "dialogue_mp3"
+      lessonReviewMp3            <-              obj .:? "review_mp3"
       return Lesson{..}
 
 {-------------------------------------------------------------------------------
