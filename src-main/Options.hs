@@ -2,6 +2,7 @@ module Options (
     Command(..)
   , Options(..)
   , OptionsSearch(..)
+  , OptionsGetLesson(..)
   , getOptions
   ) where
 
@@ -22,8 +23,9 @@ data Options = Options {
   deriving (Show)
 
 data Command =
-    CommandSearch OptionsSearch
-  | CommandLatest OptionsLatest
+    CommandSearch    OptionsSearch
+  | CommandLatest    OptionsLatest
+  | CommandGetLesson OptionsGetLesson
   deriving (Show)
 
 data OptionsSearch = OptionsSearch {
@@ -39,6 +41,12 @@ data OptionsLatest = OptionsLatest {
     , optionsLatestCount   :: Maybe Int
     , optionsLatestLang    :: Maybe String
     , optionsLatestLevelId :: Maybe Level
+    }
+  deriving (Show)
+
+data OptionsGetLesson = OptionsGetLesson {
+      optionsGetLessonV3Id :: V3Id
+    , optionsGetLessonType :: Maybe LessonContent
     }
   deriving (Show)
 
@@ -66,6 +74,14 @@ instance FromLogin ReqGetLatestLessons OptionsLatest where
       , reqGetLatestLessonsLevelId     = optionsLatestLevelId
       }
 
+instance FromLogin ReqGetLesson OptionsGetLesson where
+    fromLogin RespLogin{..} OptionsGetLesson{..} = ReqGetLesson {
+        reqGetLessonAccessToken = respLoginAccessToken
+      , reqGetLessonUserId      = respLoginUserId
+      , reqGetLessonV3Id        = optionsGetLessonV3Id
+      , reqGetLessonType        = optionsGetLessonType
+      }
+
 {-------------------------------------------------------------------------------
   Parser
 -------------------------------------------------------------------------------}
@@ -89,6 +105,9 @@ parseOptions = Options
           , command "latest" $
               info (helper <*> (CommandLatest <$> parseOptionsLatest))
                    (progDesc "Get the list of the latest lessons")
+          , command "get-lesson" $
+              info (helper <*> (CommandGetLesson <$> parseOptionsGetLesson))
+                   (progDesc "Return the contents of a particular lesson")
           ])
 
 parseOptionsSearch :: Parser OptionsSearch
@@ -126,6 +145,17 @@ parseOptionsLatest = OptionsLatest
             long "level"
           , help "Level"
           , value Nothing
+          ])
+
+parseOptionsGetLesson :: Parser OptionsGetLesson
+parseOptionsGetLesson = OptionsGetLesson
+    <$> (option (str >>= autoFromText) $ mconcat [
+            long "v3id"
+          , help "The unique ID of the lesson"
+          ])
+    <*> (optional . option (str >>= autoFromText) $ mconcat [
+            long "type"
+          , help "Which type of content to return (all, exercise, vocabulary, dialogue, grammar)"
           ])
 
 parseReqLogin :: Parser ReqLogin

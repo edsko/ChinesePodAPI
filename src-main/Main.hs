@@ -15,6 +15,9 @@ exec ChinesePodAPI{..} respLogin = go
     go (CommandLatest opts) = do
       respGetLatestLessons <- cpodGetLatestLessons $ fromLogin respLogin opts
       liftIO $ print respGetLatestLessons
+    go (CommandGetLesson opts) = do
+      respGetLesson <- cpodGetLesson $ fromLogin respLogin opts
+      liftIO $ print respGetLesson
 
 client :: ChinesePodAPI -> ReqLogin -> Command -> EitherT ServantError IO ()
 client cpodAPI@ChinesePodAPI{..} reqLogin cmd = do

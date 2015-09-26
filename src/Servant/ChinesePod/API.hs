@@ -3,20 +3,19 @@ module Servant.ChinesePod.API (
     api
     -- * API specification
   , ChinesePod
-  , Services
-  , Account
-  , Library
-  , Request
     -- ** Account
   , GetUserInfo
   , Login
   , Logout
+    -- ** Lesson
+  , GetLesson
     -- ** Library
   , GetLatestLessons
   , SearchLessons
     -- * Request types
   , ReqLogin(..)
   , ReqSignature(..)
+  , ReqGetLesson(..)
   , ReqSearchLessons(..)
   , ReqGetLatestLessons(..)
     -- * Response types
@@ -29,6 +28,8 @@ module Servant.ChinesePod.API (
   , UserId(..)
   , Level(..)
   , Lesson(..)
+  , LessonContent(..)
+  , V3Id(..)
     -- * Auxiliary dataypes used to define the API
   , OK(..)
   , Undocumented
@@ -62,19 +63,18 @@ api = Proxy
 
 type ChinesePod = "api" :> "0.6" :> Services
 
-type Services = "account" :> Account
-           :<|> "library" :> Library
-
-type Account = "login"         :> Login
-          :<|> "logout"        :> Logout
-          :<|> "get-user-info" :> GetUserInfo
-
-type Library = "get-latest-lessons" :> GetLatestLessons
-          :<|> "search-lessons"     :> SearchLessons
+type Services = "account" :> "login"              :> Login
+           :<|> "account" :> "logout"             :> Logout
+           :<|> "account" :> "get-user-info"      :> GetUserInfo
+           :<|> "lesson"  :> "get-lesson"         :> GetLesson
+           :<|> "library" :> "get-latest-lessons" :> GetLatestLessons
+           :<|> "library" :> "search-lessons"     :> SearchLessons
 
 type Login            = Request ReqLogin            RespLogin
 type Logout           = Request ReqLogout           OK
 type GetUserInfo      = Request ReqGetUserInfo      RespGetUserInfo
+
+type GetLesson        = Request ReqGetLesson        Value
 
 type SearchLessons    = Request ReqSearchLessons    RespSearchLessons
 type GetLatestLessons = Request ReqGetLatestLessons RespGetLatestLessons
@@ -107,6 +107,14 @@ data ReqLogout = ReqLogout {
 data ReqGetUserInfo = ReqGetUserInfo {
       reqGetUserInfoAccessToken :: AccessToken
     , reqGetUserInfoUserId      :: UserId
+    }
+  deriving (Show)
+
+data ReqGetLesson = ReqGetLesson {
+      reqGetLessonAccessToken :: AccessToken
+    , reqGetLessonUserId      :: UserId
+    , reqGetLessonV3Id        :: V3Id
+    , reqGetLessonType        :: Maybe LessonContent
     }
   deriving (Show)
 
@@ -230,6 +238,15 @@ instance ToFormUrlEncoded ReqGetLatestLessons where
         , optFormArg "level_id" (toText . Int) reqGetLatestLessonsLevelId
         ]
 
+instance ToFormUrlEncoded ReqGetLesson where
+     toFormUrlEncoded ReqGetLesson{..} = [
+          ( "access_token" , toText reqGetLessonAccessToken )
+        , ( "user_id"      , toText reqGetLessonUserId      )
+        , ( "v3id"         , toText reqGetLessonV3Id        )
+        ] ++ catMaybes [
+          optFormArg "type" (toText) reqGetLessonType
+        ]
+
 optFormArg :: Text -> (a -> Text) -> Maybe a -> Maybe (Text, Text)
 optFormArg nm f = fmap $ \a -> (nm, f a)
 
@@ -279,10 +296,13 @@ instance FromJSON RespGetUserInfo where
 -------------------------------------------------------------------------------}
 
 newtype UserId = UserId String
-  deriving (Show, FromJSON, ToText)
+  deriving (Show, Eq, Ord, FromJSON, ToText, FromText)
 
 newtype AccessToken = AccessToken String
-  deriving (Show, FromJSON, ToText)
+  deriving (Show, Eq, Ord, FromJSON, ToText, FromText)
+
+newtype V3Id = V3Id String
+  deriving (Show, Eq, Ord, FromJSON, ToText, FromText)
 
 -- | Some ChinesePod requests simply return OK
 data OK = OK
@@ -299,7 +319,7 @@ data Level =
   deriving (Show)
 
 data Lesson = Lesson {
-      lessonV3Id                 :: String
+      lessonV3Id                 :: V3Id
     , lessonTitle                :: String
     , lessonIntroduction         :: String
     , lessonLevel                :: Maybe Level
@@ -318,8 +338,16 @@ data Lesson = Lesson {
     }
   deriving (Show)
 
+data LessonContent =
+    LessonContentAll
+  | LessonContentExercise
+  | LessonContentVocabulary
+  | LessonContentDialogue
+  | LessonContentGrammar
+  deriving (Show)
+
 {-------------------------------------------------------------------------------
-  Decoding ChinesePod types
+  Encoding/decoding ChinesePod types
 -------------------------------------------------------------------------------}
 
 instance FromJSON OK where
@@ -348,6 +376,21 @@ instance FromJSON Lesson where
       lessonDialogueMp3          <-              obj .:? "dialogue_mp3"
       lessonReviewMp3            <-              obj .:? "review_mp3"
       return Lesson{..}
+
+instance ToText LessonContent where
+    toText LessonContentAll        = "all"
+    toText LessonContentExercise   = "exercise"
+    toText LessonContentVocabulary = "vocabulary"
+    toText LessonContentDialogue   = "dialogue"
+    toText LessonContentGrammar    = "grammar"
+
+instance FromText LessonContent where
+    fromText "all"        = Just $ LessonContentAll
+    fromText "exercise"   = Just $ LessonContentExercise
+    fromText "vocabulary" = Just $ LessonContentVocabulary
+    fromText "dialogue"   = Just $ LessonContentDialogue
+    fromText "grammar"    = Just $ LessonContentGrammar
+    fromText _otherwise   = Nothing
 
 {-------------------------------------------------------------------------------
   String/int encoding for specific types

@@ -20,6 +20,7 @@ data ChinesePodAPI = ChinesePodAPI {
     cpodLogin            :: Client Login
   , cpodLogout           :: Client Logout
   , cpodGetUserInfo      :: Client GetUserInfo
+  , cpodGetLesson        :: Client GetLesson
   , cpodGetLatestLessons :: Client GetLatestLessons
   , cpodSearchLessons    :: Client SearchLessons
   }
@@ -27,11 +28,10 @@ data ChinesePodAPI = ChinesePodAPI {
 chinesePodAPI :: BaseUrl -> ChinesePodAPI
 chinesePodAPI baseUrl = ChinesePodAPI{..}
   where
-    (     (    cpodLogin
-          :<|> cpodLogout
-          :<|> cpodGetUserInfo
-          )
-     :<|> (    cpodGetLatestLessons
-          :<|> cpodSearchLessons
-          )
+    (     cpodLogin
+     :<|> cpodLogout
+     :<|> cpodGetUserInfo
+     :<|> cpodGetLesson
+     :<|> cpodGetLatestLessons
+     :<|> cpodSearchLessons
      ) = client api baseUrl
