@@ -21,6 +21,7 @@ library
                        , bytestring
                        , cryptohash
                        , either
+                       , network-uri
                        , servant
                        , servant-client
                        , text
@@ -32,6 +33,7 @@ library
                        FlexibleInstances
                        MultiParamTypeClasses
                        RecordWildCards
+                       ScopedTypeVariables
                        TypeOperators
   other-extensions:    OverloadedStrings
   ghc-options:         -Wall
