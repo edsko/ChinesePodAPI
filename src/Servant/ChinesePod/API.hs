@@ -31,6 +31,7 @@ module Servant.ChinesePod.API (
     -- * ChinesePod specific datatypes
   , AccessToken(..)
   , Lesson(..)
+  , LessonContent(..)
   , LessonContentType(..)
   , Level(..)
   , UserId(..)
@@ -80,7 +81,7 @@ type Login            = Request ReqLogin            RespLogin
 type Logout           = Request ReqLogout           OK
 type GetUserInfo      = Request ReqGetUserInfo      RespGetUserInfo
 
-type GetLesson        = Request ReqGetLesson        Value
+type GetLesson        = Request ReqGetLesson        LessonContent
 
 type GetLatestLessons = Request ReqGetLatestLessons RespGetLatestLessons
 type SearchLessons    = Request ReqSearchLessons    RespSearchLessons
@@ -351,6 +352,198 @@ data LessonContentType =
   | LessonContentDialogue
   | LessonContentGrammar
   deriving (Show)
+
+data LessonContent = LessonContent {
+      lessonContentContentId            :: String
+    , lessonContentCreatedAt            :: String
+    , lessonContentUpdatedAt            :: String
+    , lessonContentStatusComments       :: String
+    , lessonContentStatusLocked         :: String
+    , lessonContentStatusPublished      :: String
+    , lessonContentCreatedBy            :: String
+    , lessonContentUpdatedBy            :: String
+    , lessonContentPopularity           :: String
+    , lessonContentRank                 :: String
+    , lessonContentSlug                 :: String
+    , lessonContentType                 :: String
+    , lessonContentSeriesId             :: String
+    , lessonContentChannelId            :: String
+    , lessonContentMaturity             :: String
+    , lessonContentTitle                :: String
+    , lessonContentIntroduction         :: String
+    , lessonContentTheme                :: String
+    , lessonContentChannel              :: String
+    , lessonContentLevel                :: Maybe Level
+    , lessonContentHosts                :: String
+    , lessonContentV3Id                 :: V3Id
+    , lessonContentHashCode             :: String
+    , lessonContentPublicationTimestamp :: String
+    , lessonContentTimeOffset           :: String
+    , lessonContentImage                :: String
+    , lessonContentText                 :: String
+    , lessonContentTranscription1       :: String
+    , lessonContentTranscription2       :: String
+    , lessonContentMp3Media             :: String
+    , lessonContentMp3Mobile            :: String
+    , lessonContentPdf1                 :: String
+    , lessonContentPdf2                 :: String
+    , lessonContentPdf3                 :: String
+    , lessonContentPdf4                 :: String
+    , lessonContentPpt                  :: Maybe String
+    , lessonContentPptSize              :: Maybe String
+    , lessonContentVideoFix             :: String
+    , lessonContentLinkSource           :: String
+    , lessonContentLinkRelated          :: String
+    , lessonContentExercisesExercise1   :: String
+    , lessonContentExercisesExercise2   :: String
+    , lessonContentExercisesExercise3   :: String
+    , lessonContentExercisesExercise4   :: String
+    , lessonContentXmlFileName          :: String
+    , lessonContentMp3DialogueSize      :: Int
+    , lessonContentMp3MediaSize         :: Int
+    , lessonContentMp3MobileSize        :: Int
+    , lessonContentMp3PublicSize        :: Int
+    , lessonContentMp3PrivateSize       :: Int
+    , lessonContentMp3ThefixSize        :: Int
+    , lessonContentMp3ThefixLength      :: String
+    , lessonContentMp3PublicLength      :: String
+    , lessonContentMp3PrivateLength     :: String
+    , lessonContentMp3MobileLength      :: String
+    , lessonContentMp3MediaLength       :: String
+    , lessonContentMp3DialogueLength    :: String
+    , lessonContentVideoFlv             :: String
+    , lessonContentVideoFlvSize         :: Int
+    , lessonContentVideoFlvLength       :: String
+    , lessonContentVideoMp4             :: String
+    , lessonContentVideoMp4Size         :: Int
+    , lessonContentVideoMp4Length       :: String
+    , lessonContentVideoM4v             :: String
+    , lessonContentVideoM4vSize         :: Int
+    , lessonContentVideoM4vLength       :: String
+    , lessonContentLastCommentId        :: String
+    , lessonContentLastCommentTime      :: String
+    , lessonContentIsPrivate            :: Bool
+    , lessonContentVideo                :: Maybe String
+    , lessonContentLessonPlan           :: String
+    , lessonContentLessonAssignment     :: String
+    , lessonContentName                 :: String
+    , lessonContentSeriesName           :: String
+    , lessonContentRadioQualityMp3      :: String
+    , lessonContentCdQualityMp3         :: String
+    , lessonContentDialogueMp3          :: String
+    , lessonContentReviewMp3            :: String
+    , lessonContentCommentCount         :: Int
+    , lessonContentVideoLesson          :: Bool
+    , lessonContentAccessLevel          :: String
+    , lessonContentBookMarked           :: Bool
+    , lessonContentMarkAsStudied        :: Bool
+    , lessonContentStudentFullname      :: String
+    , lessonContentPostDate             :: Maybe String
+    , lessonContentStudentComment       :: Maybe String
+    , lessonContentFileName             :: String
+    , lessonContentFileUrl              :: Maybe String
+    , lessonContentTeacherName          :: Maybe String
+    , lessonContentTeacherId            :: Maybe String
+    , lessonContentReviewDate           :: Maybe String
+    , lessonContentTeacherFeedback      :: Maybe String
+    }
+  deriving (Show)
+
+instance FromJSON LessonContent where
+    parseJSON = withObject "LessonContent" $ \obj -> do
+      lessonContentContentId            <-              obj .:  "content_id"
+      lessonContentCreatedAt            <-              obj .:  "created_at"
+      lessonContentUpdatedAt            <-              obj .:  "updated_at"
+      lessonContentStatusComments       <-              obj .:  "status_comments"
+      lessonContentStatusLocked         <-              obj .:  "status_locked"
+      lessonContentStatusPublished      <-              obj .:  "status_published"
+      lessonContentCreatedBy            <-              obj .:  "created_by"
+      lessonContentUpdatedBy            <-              obj .:  "updated_by"
+      lessonContentPopularity           <-              obj .:  "popularity"
+      lessonContentRank                 <-              obj .:  "rank"
+      lessonContentSlug                 <-              obj .:  "slug"
+      lessonContentType                 <-              obj .:  "type"
+      lessonContentSeriesId             <-              obj .:  "series_id"
+      lessonContentChannelId            <-              obj .:  "channel_id"
+      lessonContentMaturity             <-              obj .:  "maturity"
+      lessonContentTitle                <-              obj .:  "title"
+      lessonContentIntroduction         <-              obj .:  "introduction"
+      lessonContentTheme                <-              obj .:  "theme"
+      lessonContentChannel              <-              obj .:  "channel"
+      lessonContentLevel                <- strOrInt <$> obj .:  "level"
+      lessonContentHosts                <-              obj .:  "hosts"
+      lessonContentV3Id                 <-              obj .:  "v3_id"
+      lessonContentHashCode             <-              obj .:  "hash_code"
+      lessonContentPublicationTimestamp <-              obj .:  "publication_timestamp"
+      lessonContentTimeOffset           <-              obj .:  "time_offset"
+      lessonContentImage                <-              obj .:  "image"
+      lessonContentText                 <-              obj .:  "text"
+      lessonContentTranscription1       <-              obj .:  "transcription1"
+      lessonContentTranscription2       <-              obj .:  "transcription2"
+      lessonContentMp3Media             <-              obj .:  "mp3_media"
+      lessonContentMp3Mobile            <-              obj .:  "mp3_mobile"
+      lessonContentPdf1                 <-              obj .:  "pdf1"
+      lessonContentPdf2                 <-              obj .:  "pdf2"
+      lessonContentPdf3                 <-              obj .:  "pdf3"
+      lessonContentPdf4                 <-              obj .:  "pdf4"
+      lessonContentPpt                  <- nullable <$> obj .:? "ppt"      .!= Nullable Nothing
+      lessonContentPptSize              <- nullable <$> obj .:? "ppt_size" .!= Nullable Nothing
+      lessonContentVideoFix             <-              obj .:  "video_fix"
+      lessonContentLinkSource           <-              obj .:  "link_source"
+      lessonContentLinkRelated          <-              obj .:  "link_related"
+      lessonContentExercisesExercise1   <-              obj .:  "exercises_exercise1"
+      lessonContentExercisesExercise2   <-              obj .:  "exercises_exercise2"
+      lessonContentExercisesExercise3   <-              obj .:  "exercises_exercise3"
+      lessonContentExercisesExercise4   <-              obj .:  "exercises_exercise4"
+      lessonContentXmlFileName          <-              obj .:  "xml_file_name"
+      lessonContentMp3DialogueSize      <- strOrInt <$> obj .:  "mp3_dialogue_size"
+      lessonContentMp3MediaSize         <- strOrInt <$> obj .:  "mp3_media_size"
+      lessonContentMp3MobileSize        <- strOrInt <$> obj .:  "mp3_mobile_size"
+      lessonContentMp3PublicSize        <- strOrInt <$> obj .:  "mp3_public_size"
+      lessonContentMp3PrivateSize       <- strOrInt <$> obj .:  "mp3_private_size"
+      lessonContentMp3ThefixSize        <- strOrInt <$> obj .:  "mp3_thefix_size"
+      lessonContentMp3ThefixLength      <-              obj .:  "mp3_thefix_length"
+      lessonContentMp3PublicLength      <-              obj .:  "mp3_public_length"
+      lessonContentMp3PrivateLength     <-              obj .:  "mp3_private_length"
+      lessonContentMp3MobileLength      <-              obj .:  "mp3_mobile_length"
+      lessonContentMp3MediaLength       <-              obj .:  "mp3_media_length"
+      lessonContentMp3DialogueLength    <-              obj .:  "mp3_dialogue_length"
+      lessonContentVideoFlv             <-              obj .:  "video_flv"
+      lessonContentVideoFlvSize         <- strOrInt <$> obj .:  "video_flv_size"
+      lessonContentVideoFlvLength       <-              obj .:  "video_flv_length"
+      lessonContentVideoMp4             <-              obj .:  "video_mp4"
+      lessonContentVideoMp4Size         <- strOrInt <$> obj .:  "video_mp4_size"
+      lessonContentVideoMp4Length       <-              obj .:  "video_mp4_length"
+      lessonContentVideoM4v             <-              obj .:  "video_m4v"
+      lessonContentVideoM4vSize         <- strOrInt <$> obj .:  "video_m4v_size"
+      lessonContentVideoM4vLength       <-              obj .:  "video_m4v_length"
+      lessonContentLastCommentId        <-              obj .:  "last_comment_id"
+      lessonContentLastCommentTime      <-              obj .:  "last_comment_time"
+      lessonContentIsPrivate            <- strOrInt <$> obj .:  "is_private"
+      lessonContentVideo                <- nullable <$> obj .:? "video" .!= Nullable Nothing
+      lessonContentLessonPlan           <-              obj .:  "lesson_plan"
+      lessonContentLessonAssignment     <-              obj .:  "lesson_assignment"
+      lessonContentName                 <-              obj .:  "name"
+      lessonContentSeriesName           <-              obj .:  "series_name"
+      lessonContentRadioQualityMp3      <-              obj .:  "radio_quality_mp3"
+      lessonContentCdQualityMp3         <-              obj .:  "cd_quality_mp3"
+      lessonContentDialogueMp3          <-              obj .:  "dialogue_mp3"
+      lessonContentReviewMp3            <-              obj .:  "review_mp3"
+      lessonContentCommentCount         <- strOrInt <$> obj .:  "comment_count"
+      lessonContentVideoLesson          <-              obj .:  "video_lesson"
+      lessonContentAccessLevel          <-              obj .:  "access_level"
+      lessonContentBookMarked           <- strOrInt <$> obj .:  "book_marked"
+      lessonContentMarkAsStudied        <- strOrInt <$> obj .:  "mark_as_studied"
+      lessonContentStudentFullname      <-              obj .:  "student_fullname"
+      lessonContentPostDate             <- nullable <$> obj .:? "post_date"        .!= Nullable Nothing
+      lessonContentStudentComment       <- nullable <$> obj .:? "student_comment"  .!= Nullable Nothing
+      lessonContentFileName             <-              obj .:  "file_name"
+      lessonContentFileUrl              <- nullable <$> obj .:? "file_url"         .!= Nullable Nothing
+      lessonContentTeacherName          <- nullable <$> obj .:? "teacher_name"     .!= Nullable Nothing
+      lessonContentTeacherId            <-              obj .:  "teacher_id"
+      lessonContentReviewDate           <- nullable <$> obj .:? "review_date"      .!= Nullable Nothing
+      lessonContentTeacherFeedback      <- nullable <$> obj .:? "teacher_feedback" .!= Nullable Nothing
+      return LessonContent{..}
 
 {-------------------------------------------------------------------------------
   Encoding/decoding ChinesePod types
