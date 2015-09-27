@@ -47,6 +47,7 @@ module Servant.ChinesePod.API (
   , parseFailure
   ) where
 
+import Prelude hiding (Word)
 import Crypto.Hash
 import Data.Aeson.Types
 import GHC.Generics
@@ -452,8 +453,84 @@ data LessonContent = LessonContent {
     , lessonContentTeacherFeedback      :: Maybe String
     , lessonContentTopics               :: [String]
     , lessonContentFunctions            :: [String]
+    , lessonContentDialogue             :: [Sentence]
     }
   deriving (Show, Generic)
+
+data Sentence = Sentence {
+      sentenceV3Id          :: V3Id
+    , sentenceAudio         :: String
+    , sentenceDisplayOrder  :: Int
+    , sentenceId            :: String
+    , sentencePinyin        :: String
+    , sentenceRow3          :: String
+    , sentenceRow4          :: String
+    , sentenceSource        :: String
+    , sentenceSourceT       :: String
+    , sentenceSpeaker       :: String
+    , sentenceTarget        :: String
+    , sentenceVocabulary    :: String
+    , sentenceSentenceWords :: [Word]
+    }
+  deriving (Show, Generic)
+
+data Word = Word {
+      wordV3Id    :: Maybe V3Id
+    , wordAudio   :: Maybe String
+    , wordId      :: Maybe String
+    , wordPinyin  :: String
+    , wordSource  :: String
+    , wordSourceT :: String
+    , wordTarget  :: String
+    , wordVcid    :: Maybe String
+    }
+  deriving (Show, Generic)
+
+{-------------------------------------------------------------------------------
+  Encoding/decoding ChinesePod types
+-------------------------------------------------------------------------------}
+
+instance FromJSON OK where
+    parseJSON = withObject "OK" $ \obj -> do
+      result <- obj .: "result"
+      case result :: String of
+        "OK" -> return OK
+        _    -> fail $ "Expected OK"
+
+instance FromJSON Lesson where
+    parseJSON = withObject "Lesson" $ \obj -> do
+      lessonV3Id                 <-              obj .:  "v3_id"
+      lessonTitle                <-              obj .:  "title"
+      lessonIntroduction         <-              obj .:  "introduction"
+      lessonLevel                <- strOrInt <$> obj .:  "level"
+      lessonName                 <-              obj .:  "name"
+      lessonSlug                 <-              obj .:  "slug"
+      lessonLessonId             <- nullable <$> obj .:? "lesson_id" .!= Nullable Nothing
+      lessonPublicationTimestamp <-              obj .:  "publication_timestamp"
+      lessonImage                <-              obj .:  "image"
+      lessonBookMarked           <- strOrInt <$> obj .:  "book_marked"
+      lessonMarkAsStudied        <- strOrInt <$> obj .:  "mark_as_studied"
+      lessonSource               <- nullable <$> obj .:? "source" .!= Nullable Nothing
+      lessonStatus               <-              obj .:? "status"
+      lessonRadioQualityMp3      <-              obj .:? "radio_quality_mp3"
+      lessonDialogueMp3          <-              obj .:? "dialogue_mp3"
+      lessonReviewMp3            <-              obj .:? "review_mp3"
+      return Lesson{..}
+
+instance ToText LessonContentType where
+    toText LessonContentAll        = "all"
+    toText LessonContentExercise   = "exercise"
+    toText LessonContentVocabulary = "vocabulary"
+    toText LessonContentDialogue   = "dialogue"
+    toText LessonContentGrammar    = "grammar"
+
+instance FromText LessonContentType where
+    fromText "all"        = Just $ LessonContentAll
+    fromText "exercise"   = Just $ LessonContentExercise
+    fromText "vocabulary" = Just $ LessonContentVocabulary
+    fromText "dialogue"   = Just $ LessonContentDialogue
+    fromText "grammar"    = Just $ LessonContentGrammar
+    fromText _otherwise   = Nothing
 
 instance FromJSON LessonContent where
     parseJSON = withObject "LessonContent" $ \obj -> do
@@ -551,53 +628,37 @@ instance FromJSON LessonContent where
       lessonContentTeacherFeedback      <- nullable <$> obj .:? "teacher_feedback" .!= Nullable Nothing
       lessonContentTopics               <-              obj .:  "topics"
       lessonContentFunctions            <-              obj .:  "functions"
+      lessonContentDialogue             <-              obj .:  "dialogue"
       return LessonContent{..}
 
-{-------------------------------------------------------------------------------
-  Encoding/decoding ChinesePod types
--------------------------------------------------------------------------------}
+instance FromJSON Sentence where
+    parseJSON = withObject "Sentence" $ \obj -> do
+      sentenceV3Id          <-              obj .: "v3_id"
+      sentenceAudio         <-              obj .: "audio"
+      sentenceDisplayOrder  <- strOrInt <$> obj .: "display_order"
+      sentenceId            <-              obj .: "id"
+      sentencePinyin        <-              obj .: "pinyin"
+      sentenceRow3          <-              obj .: "row_3"
+      sentenceRow4          <-              obj .: "row_4"
+      sentenceSource        <-              obj .: "source"
+      sentenceSourceT       <-              obj .: "source_t"
+      sentenceSpeaker       <-              obj .: "speaker"
+      sentenceTarget        <-              obj .: "target"
+      sentenceVocabulary    <-              obj .: "vocabulary"
+      sentenceSentenceWords <-              obj .: "sentence_words"
+      return Sentence{..}
 
-instance FromJSON OK where
-    parseJSON = withObject "OK" $ \obj -> do
-      result <- obj .: "result"
-      case result :: String of
-        "OK" -> return OK
-        _    -> fail $ "Expected OK"
-
-instance FromJSON Lesson where
-    parseJSON = withObject "Lesson" $ \obj -> do
-      lessonV3Id                 <-              obj .:  "v3_id"
-      lessonTitle                <-              obj .:  "title"
-      lessonIntroduction         <-              obj .:  "introduction"
-      lessonLevel                <- strOrInt <$> obj .:  "level"
-      lessonName                 <-              obj .:  "name"
-      lessonSlug                 <-              obj .:  "slug"
-      lessonLessonId             <- nullable <$> obj .:? "lesson_id" .!= Nullable Nothing
-      lessonPublicationTimestamp <-              obj .:  "publication_timestamp"
-      lessonImage                <-              obj .:  "image"
-      lessonBookMarked           <- strOrInt <$> obj .:  "book_marked"
-      lessonMarkAsStudied        <- strOrInt <$> obj .:  "mark_as_studied"
-      lessonSource               <- nullable <$> obj .:? "source" .!= Nullable Nothing
-      lessonStatus               <-              obj .:? "status"
-      lessonRadioQualityMp3      <-              obj .:? "radio_quality_mp3"
-      lessonDialogueMp3          <-              obj .:? "dialogue_mp3"
-      lessonReviewMp3            <-              obj .:? "review_mp3"
-      return Lesson{..}
-
-instance ToText LessonContentType where
-    toText LessonContentAll        = "all"
-    toText LessonContentExercise   = "exercise"
-    toText LessonContentVocabulary = "vocabulary"
-    toText LessonContentDialogue   = "dialogue"
-    toText LessonContentGrammar    = "grammar"
-
-instance FromText LessonContentType where
-    fromText "all"        = Just $ LessonContentAll
-    fromText "exercise"   = Just $ LessonContentExercise
-    fromText "vocabulary" = Just $ LessonContentVocabulary
-    fromText "dialogue"   = Just $ LessonContentDialogue
-    fromText "grammar"    = Just $ LessonContentGrammar
-    fromText _otherwise   = Nothing
+instance FromJSON Word where
+    parseJSON = withObject "Word" $ \obj -> do
+      wordV3Id    <- obj .:? "v3_id"
+      wordAudio   <- obj .:? "audio"
+      wordId      <- obj .:? "id"
+      wordPinyin  <- obj .:  "pinyin"
+      wordSource  <- obj .:  "source"
+      wordSourceT <- obj .:  "source_t"
+      wordTarget  <- obj .:  "target"
+      wordVcid    <- obj .:? "vcid"
+      return Word{..}
 
 {-------------------------------------------------------------------------------
   String/int encoding for specific types
@@ -767,23 +828,25 @@ parseFailure inp = fail $ "Could not parse " ++ show inp ++ " "
   PrettyVal instances
 -------------------------------------------------------------------------------}
 
+instance PrettyVal ReqGetLatestLessons
+instance PrettyVal ReqGetLesson
+instance PrettyVal ReqGetUserInfo
 instance PrettyVal ReqLogin
 instance PrettyVal ReqLogout
-instance PrettyVal ReqGetUserInfo
-instance PrettyVal ReqSignature
-instance PrettyVal RespLogin
-instance PrettyVal RespGetUserInfo
-instance PrettyVal ReqGetLesson
-instance PrettyVal ReqGetLatestLessons
 instance PrettyVal ReqSearchLessons
+instance PrettyVal ReqSignature
+instance PrettyVal RespGetUserInfo
+instance PrettyVal RespLogin
 
 instance PrettyVal AccessToken
 instance PrettyVal Lesson
 instance PrettyVal LessonContent
 instance PrettyVal LessonContentType
 instance PrettyVal Level
+instance PrettyVal OK
+instance PrettyVal Sentence
 instance PrettyVal UserId
 instance PrettyVal V3Id
-instance PrettyVal OK
+instance PrettyVal Word
 
 instance PrettyVal a => PrettyVal (SearchResults a)

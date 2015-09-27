@@ -18,6 +18,7 @@ library
   other-modules:       Servant.ChinesePod.Util.Orphans.PrettyVal
   build-depends:         base >=4.8 && <4.9
                        , aeson
+                       , aeson-pretty
                        , bytestring
                        , containers
                        , cryptohash
