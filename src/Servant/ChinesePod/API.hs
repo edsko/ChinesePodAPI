@@ -49,7 +49,7 @@ module Servant.ChinesePod.API (
 
 import Prelude hiding (Word)
 import Crypto.Hash
-import Data.Aeson.Types
+import Data.Aeson.Types hiding ((.:?))
 import GHC.Generics
 import Data.Map (Map)
 import Data.Maybe (catMaybes)
@@ -58,6 +58,7 @@ import Data.Text (Text)
 import Data.Typeable
 import Servant.API
 import Text.Show.Pretty (PrettyVal(..))
+import qualified Data.Aeson.Types     as Aeson
 import qualified Data.ByteString      as BS
 import qualified Data.ByteString.UTF8 as BS.UTF8
 import qualified Data.HashMap.Strict  as HashMap
@@ -508,12 +509,12 @@ instance FromJSON Lesson where
       lessonLevel                <- strOrInt <$> obj .:  "level"
       lessonName                 <-              obj .:  "name"
       lessonSlug                 <-              obj .:  "slug"
-      lessonLessonId             <- nullable <$> obj .:? "lesson_id" .!= Nullable Nothing
+      lessonLessonId             <-              obj .:? "lesson_id"
       lessonPublicationTimestamp <-              obj .:  "publication_timestamp"
       lessonImage                <-              obj .:  "image"
       lessonBookMarked           <- strOrInt <$> obj .:  "book_marked"
       lessonMarkAsStudied        <- strOrInt <$> obj .:  "mark_as_studied"
-      lessonSource               <- nullable <$> obj .:? "source" .!= Nullable Nothing
+      lessonSource               <-              obj .:? "source"
       lessonStatus               <-              obj .:? "status"
       lessonRadioQualityMp3      <-              obj .:? "radio_quality_mp3"
       lessonDialogueMp3          <-              obj .:? "dialogue_mp3"
@@ -572,8 +573,8 @@ instance FromJSON LessonContent where
       lessonContentPdf2                 <-              obj .:  "pdf2"
       lessonContentPdf3                 <-              obj .:  "pdf3"
       lessonContentPdf4                 <-              obj .:  "pdf4"
-      lessonContentPpt                  <- nullable <$> obj .:? "ppt"      .!= Nullable Nothing
-      lessonContentPptSize              <- nullable <$> obj .:? "ppt_size" .!= Nullable Nothing
+      lessonContentPpt                  <-              obj .:? "ppt"
+      lessonContentPptSize              <-              obj .:? "ppt_size"
       lessonContentVideoFix             <-              obj .:  "video_fix"
       lessonContentLinkSource           <-              obj .:  "link_source"
       lessonContentLinkRelated          <-              obj .:  "link_related"
@@ -606,7 +607,7 @@ instance FromJSON LessonContent where
       lessonContentLastCommentId        <-              obj .:  "last_comment_id"
       lessonContentLastCommentTime      <-              obj .:  "last_comment_time"
       lessonContentIsPrivate            <- strOrInt <$> obj .:  "is_private"
-      lessonContentVideo                <- nullable <$> obj .:? "video" .!= Nullable Nothing
+      lessonContentVideo                <-              obj .:? "video"
       lessonContentLessonPlan           <-              obj .:  "lesson_plan"
       lessonContentLessonAssignment     <-              obj .:  "lesson_assignment"
       lessonContentName                 <-              obj .:  "name"
@@ -621,18 +622,18 @@ instance FromJSON LessonContent where
       lessonContentBookMarked           <- strOrInt <$> obj .:  "book_marked"
       lessonContentMarkAsStudied        <- strOrInt <$> obj .:  "mark_as_studied"
       lessonContentStudentFullname      <-              obj .:  "student_fullname"
-      lessonContentPostDate             <- nullable <$> obj .:? "post_date"        .!= Nullable Nothing
-      lessonContentStudentComment       <- nullable <$> obj .:? "student_comment"  .!= Nullable Nothing
+      lessonContentPostDate             <-              obj .:? "post_date"
+      lessonContentStudentComment       <-              obj .:? "student_comment"
       lessonContentFileName             <-              obj .:  "file_name"
-      lessonContentFileUrl              <- nullable <$> obj .:? "file_url"         .!= Nullable Nothing
-      lessonContentTeacherName          <- nullable <$> obj .:? "teacher_name"     .!= Nullable Nothing
+      lessonContentFileUrl              <-              obj .:? "file_url"
+      lessonContentTeacherName          <-              obj .:? "teacher_name"
       lessonContentTeacherId            <-              obj .:  "teacher_id"
-      lessonContentReviewDate           <- nullable <$> obj .:? "review_date"      .!= Nullable Nothing
-      lessonContentTeacherFeedback      <- nullable <$> obj .:? "teacher_feedback" .!= Nullable Nothing
+      lessonContentReviewDate           <-              obj .:? "review_date"
+      lessonContentTeacherFeedback      <-              obj .:? "teacher_feedback"
       lessonContentTopics               <-              obj .:  "topics"
       lessonContentFunctions            <-              obj .:  "functions"
       lessonContentDialogue             <-              obj .:? "dialogue"
-      lessonContentGrammar              <- nullable <$> obj .:? "grammar"          .!= Nullable Nothing
+      lessonContentGrammar              <-              obj .:? "grammar"
       return LessonContent{..}
 
 instance FromJSON Sentence where
@@ -793,16 +794,6 @@ instance FromJSON a => FromJSON (SearchResults a) where
         parseRaw (idx, val) = do val' <- parseJSON val ; return (idx, val')
 
 {-------------------------------------------------------------------------------
-  Nullable fields (fields whose absence is represented with an explicit 'null')
--------------------------------------------------------------------------------}
-
-newtype Nullable a = Nullable { nullable :: Maybe a }
-
-instance FromJSON a => FromJSON (Nullable a) where
-    parseJSON Null = return $ Nullable Nothing
-    parseJSON val  = Nullable . Just <$> parseJSON val
-
-{-------------------------------------------------------------------------------
   Undocumented fields
 -------------------------------------------------------------------------------}
 
@@ -827,6 +818,12 @@ tryRead strA =
 parseFailure :: forall a m. (Typeable a, Monad m) => Text -> m a
 parseFailure inp = fail $ "Could not parse " ++ show inp ++ " "
                        ++ "as " ++ show (typeOf (undefined :: a))
+
+-- | Variant on '(Aeson..:?)' which regards 'Null' as absent, too.
+(.:?) :: FromJSON a => Object -> Text -> Parser (Maybe a)
+obj .:? key = case HashMap.lookup key obj of
+                Just Null  -> return Nothing
+                _otherwise -> obj Aeson..:? key
 
 {-------------------------------------------------------------------------------
   PrettyVal instances
