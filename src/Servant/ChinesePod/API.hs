@@ -446,6 +446,8 @@ data LessonContent = LessonContent {
     , lessonContentTeacherId            :: Maybe String
     , lessonContentReviewDate           :: Maybe String
     , lessonContentTeacherFeedback      :: Maybe String
+    , lessonContentTopics               :: [String]
+    , lessonContentFunctions            :: [String]
     }
   deriving (Show)
 
@@ -543,6 +545,8 @@ instance FromJSON LessonContent where
       lessonContentTeacherId            <-              obj .:  "teacher_id"
       lessonContentReviewDate           <- nullable <$> obj .:? "review_date"      .!= Nullable Nothing
       lessonContentTeacherFeedback      <- nullable <$> obj .:? "teacher_feedback" .!= Nullable Nothing
+      lessonContentTopics               <-              obj .:  "topics"
+      lessonContentFunctions            <-              obj .:  "functions"
       return LessonContent{..}
 
 {-------------------------------------------------------------------------------
