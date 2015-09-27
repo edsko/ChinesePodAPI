@@ -56,12 +56,13 @@ module Servant.ChinesePod.API (
 import Prelude hiding (Word)
 import Crypto.Hash
 import Data.Aeson.Types hiding ((.:?))
-import GHC.Generics
+import Data.Binary (Binary)
 import Data.Map (Map)
 import Data.Maybe (catMaybes)
 import Data.Proxy
 import Data.Text (Text)
 import Data.Typeable
+import GHC.Generics
 import Servant.API
 import Text.Show.Pretty (PrettyVal(..))
 import qualified Data.Aeson.Types     as Aeson
@@ -335,6 +336,7 @@ data Level =
   | LevelUpperIntermediate
   | LevelAdvanced
   | LevelMedia
+  | LevelOther String
   deriving (Show, Generic)
 
 data Lesson = Lesson {
@@ -820,6 +822,7 @@ instance ToStrOrInt Level where
       go LevelUpperIntermediate = "Upper Intermediate"
       go LevelAdvanced          = "Advanced"
       go LevelMedia             = "Media"
+      go (LevelOther other)     = T.pack other
 
   toInt = go
     where
@@ -829,6 +832,7 @@ instance ToStrOrInt Level where
       go LevelUpperIntermediate = 4
       go LevelAdvanced          = 5
       go LevelMedia             = 6
+      go (LevelOther other)     = error "No numeric value for LevelOther"
 
 instance FromStrOrInt Int where
   fromStr = tryRead . T.unpack
@@ -860,7 +864,7 @@ instance FromStrOrInt (Maybe Level) where
       go "Upper Intermediate" = Just $ Just LevelUpperIntermediate
       go "Advanced"           = Just $ Just LevelAdvanced
       go "Media"              = Just $ Just LevelMedia
-      go _                    = Nothing
+      go other                = Just $ Just (LevelOther $ T.unpack other)
 
   fromInt = go
     where
@@ -974,6 +978,16 @@ obj .:~ key = strOrInt <$> obj .: key
 -- | Combination of '(.:?)' and '(.:~)'
 (.:?~) :: (Typeable a, FromStrOrInt a) => Object -> Text -> Parser (Maybe a)
 obj .:?~ key = fmap strOrInt <$> obj .:? key
+
+{-------------------------------------------------------------------------------
+  Binary instances
+-------------------------------------------------------------------------------}
+
+instance Binary Lesson
+instance Binary V3Id
+instance Binary Level
+
+instance Binary a => Binary (SearchResults a)
 
 {-------------------------------------------------------------------------------
   PrettyVal instances

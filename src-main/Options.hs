@@ -27,6 +27,7 @@ data Command =
     CommandSearch    OptionsSearch
   | CommandLatest    OptionsLatest
   | CommandGetLesson OptionsGetLesson
+  | CommandDownloadIndex
   deriving (Show)
 
 data OptionsSearch = OptionsSearch {
@@ -124,6 +125,9 @@ parseOptions = Options
           , command "get-lesson" $
               info (helper <*> (CommandGetLesson <$> parseOptionsGetLesson))
                    (progDesc "Return the contents of a particular lesson")
+          , command "download-index" $
+              info (helper <*> (pure CommandDownloadIndex))
+                   (progDesc "Download the full lesson index")
           ])
 
 parseOptionsSearch :: Parser OptionsSearch

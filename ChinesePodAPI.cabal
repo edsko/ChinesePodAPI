@@ -19,6 +19,7 @@ library
   build-depends:         base >=4.8 && <4.9
                        , aeson
                        , aeson-pretty
+                       , binary
                        , bytestring
                        , containers
                        , cryptohash
@@ -50,6 +51,8 @@ executable cpod-query
   other-modules:       Options
   build-depends:         base
                        , ChinesePodAPI
+                       , binary
+                       , directory
                        , network-uri
                        , optparse-applicative
                        , pretty-show
