@@ -370,8 +370,6 @@ data LessonContentType =
   | LessonContentGrammar
   deriving (Show, Generic)
 
--- TODO: We currently don't parse the grammar
--- (it doesn't appear to be set on any lessons?)
 data LessonContent = LessonContent {
       lessonContentContentId            :: String
     , lessonContentCreatedAt            :: String
