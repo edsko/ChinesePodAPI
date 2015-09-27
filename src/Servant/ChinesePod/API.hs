@@ -446,7 +446,7 @@ data LessonContent = LessonContent {
     , lessonContentName                 :: String
     , lessonContentSeriesName           :: String
     , lessonContentRadioQualityMp3      :: String
-    , lessonContentCdQualityMp3         :: String
+    , lessonContentCdQualityMp3         :: Maybe String
     , lessonContentDialogueMp3          :: Maybe String
     , lessonContentReviewMp3            :: Maybe String
     , lessonContentCommentCount         :: Int
@@ -695,7 +695,7 @@ instance FromJSON LessonContent where
       lessonContentName                 <- obj .:  "name"
       lessonContentSeriesName           <- obj .:  "series_name"
       lessonContentRadioQualityMp3      <- obj .:  "radio_quality_mp3"
-      lessonContentCdQualityMp3         <- obj .:  "cd_quality_mp3"
+      lessonContentCdQualityMp3         <- obj .:? "cd_quality_mp3"
       lessonContentDialogueMp3          <- obj .:? "dialogue_mp3"
       lessonContentReviewMp3            <- obj .:? "review_mp3"
       lessonContentCommentCount         <- obj .:~ "comment_count"
