@@ -31,6 +31,7 @@ module Servant.ChinesePod.API (
     -- * ChinesePod specific datatypes
   , AccessToken(..)
   , Example
+  , Expansion(..)
   , GrammarPoint(..)
   , GrammarSentence(..)
   , Lesson(..)
@@ -54,6 +55,7 @@ module Servant.ChinesePod.API (
   ) where
 
 import Prelude hiding (Word)
+import Control.Monad
 import Crypto.Hash
 import Data.Aeson.Types hiding ((.:?))
 import Data.Binary (Binary)
@@ -71,6 +73,7 @@ import qualified Data.ByteString.UTF8 as BS.UTF8
 import qualified Data.HashMap.Strict  as HashMap
 import qualified Data.Map             as Map
 import qualified Data.Text            as T
+import qualified Data.Vector          as Vector
 
 import Servant.ChinesePod.Util.Orphans.PrettyVal ()
 
@@ -446,8 +449,8 @@ data LessonContent = LessonContent {
     , lessonContentSeriesName           :: String
     , lessonContentRadioQualityMp3      :: String
     , lessonContentCdQualityMp3         :: String
-    , lessonContentDialogueMp3          :: String
-    , lessonContentReviewMp3            :: String
+    , lessonContentDialogueMp3          :: Maybe String
+    , lessonContentReviewMp3            :: Maybe String
     , lessonContentCommentCount         :: Int
     , lessonContentVideoLesson          :: Bool
     , lessonContentAccessLevel          :: String
@@ -466,7 +469,7 @@ data LessonContent = LessonContent {
     , lessonContentFunctions            :: [String]
     , lessonContentDialogue             :: Maybe [Sentence]
     , lessonContentGrammar              :: Maybe [GrammarPoint]
-    , lessonContentExpansion            :: Maybe (Map String [Example])
+    , lessonContentExpansion            :: Maybe Expansion
     , lessonContentVocabulary           :: Maybe Vocabulary
     }
   deriving (Show, Generic)
@@ -564,6 +567,11 @@ data Vocabulary = Vocabulary {
       vocabularyKeyVocab :: [Word]
     , vocabularySupVocab :: [Word]
     }
+  deriving (Show, Generic)
+
+data Expansion = Expansion {
+    expansion :: Map String [Example]
+  }
   deriving (Show, Generic)
 
 {-------------------------------------------------------------------------------
@@ -690,8 +698,8 @@ instance FromJSON LessonContent where
       lessonContentSeriesName           <- obj .:  "series_name"
       lessonContentRadioQualityMp3      <- obj .:  "radio_quality_mp3"
       lessonContentCdQualityMp3         <- obj .:  "cd_quality_mp3"
-      lessonContentDialogueMp3          <- obj .:  "dialogue_mp3"
-      lessonContentReviewMp3            <- obj .:  "review_mp3"
+      lessonContentDialogueMp3          <- obj .:? "dialogue_mp3"
+      lessonContentReviewMp3            <- obj .:? "review_mp3"
       lessonContentCommentCount         <- obj .:~ "comment_count"
       lessonContentVideoLesson          <- obj .:  "video_lesson"
       lessonContentAccessLevel          <- obj .:  "access_level"
@@ -755,7 +763,7 @@ instance FromJSON GrammarPoint where
       grammarPointGrammarId      <- obj .:  "grammar_id"
       grammarPointImage          <- obj .:  "image"
       grammarPointIntroduction   <- obj .:  "introduction"
-      grammarPointLevel          <- obj .:~ "level_name"
+      grammarPointLevel          <- join <$> obj .:?~ "level_name"
       grammarPointName           <- obj .:  "name"
       grammarPointParentId       <- obj .:  "parent_id"
       grammarPointPath           <- obj .:  "path"
@@ -809,6 +817,23 @@ instance FromJSON Vocabulary where
       vocabularySupVocab <- obj .: "sup_vocab"
       return Vocabulary{..}
 
+instance FromJSON Expansion where
+     parseJSON (Object obj) =
+         Expansion . Map.fromList <$> mapM parseField (HashMap.toList obj)
+       where
+         parseField :: (Text, Value) -> Parser (String, [Example])
+         parseField (word, val) = do
+           examples <- parseJSON val
+           return (T.unpack word, examples)
+
+     parseJSON (Array arr) = do
+         if Vector.null arr
+           then return Expansion { expansion = Map.empty }
+           else fail $ "Unexpected non-empty array in 'expansion'"
+
+     parseJSON val =
+         typeMismatch "Expansion" val
+
 {-------------------------------------------------------------------------------
   String/int encoding for specific types
 -------------------------------------------------------------------------------}
@@ -832,7 +857,7 @@ instance ToStrOrInt Level where
       go LevelUpperIntermediate = 4
       go LevelAdvanced          = 5
       go LevelMedia             = 6
-      go (LevelOther other)     = error "No numeric value for LevelOther"
+      go (LevelOther other)     = error $ "No numeric value for " ++ other
 
 instance FromStrOrInt Int where
   fromStr = tryRead . T.unpack
@@ -983,9 +1008,17 @@ obj .:?~ key = fmap strOrInt <$> obj .:? key
   Binary instances
 -------------------------------------------------------------------------------}
 
+instance Binary Example
+instance Binary Expansion
+instance Binary GrammarPoint
+instance Binary GrammarSentence
 instance Binary Lesson
-instance Binary V3Id
+instance Binary LessonContent
 instance Binary Level
+instance Binary Sentence
+instance Binary V3Id
+instance Binary Vocabulary
+instance Binary Word
 
 instance Binary a => Binary (SearchResults a)
 
@@ -1005,6 +1038,7 @@ instance PrettyVal RespLogin
 
 instance PrettyVal AccessToken
 instance PrettyVal Example
+instance PrettyVal Expansion
 instance PrettyVal GrammarPoint
 instance PrettyVal GrammarSentence
 instance PrettyVal Lesson

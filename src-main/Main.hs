@@ -6,6 +6,7 @@ import Text.Show.Pretty
 import Text.Printf (printf)
 import Servant.ChinesePod.API
 import Servant.ChinesePod.Client
+import qualified Data.Map as Map
 
 import Options
 
@@ -22,8 +23,8 @@ exec cpodAPI@ChinesePodAPI{..} respLogin = go
     go (CommandGetLesson opts) = do
       respGetLesson <- cpodGetLesson $ fromLogin respLogin opts
       liftIO $ putStrLn $ dumpStr respGetLesson
-    go CommandDownloadIndex = do
-      downloadIndex cpodAPI respLogin
+    go CommandDownloadIndex   = downloadIndex   cpodAPI respLogin
+    go CommandDownloadContent = downloadContent cpodAPI respLogin
 
 -- | Download the full lesson index
 downloadIndex :: ChinesePodAPI -> RespLogin -> EitherT ServantError IO ()
@@ -51,7 +52,7 @@ downloadIndex ChinesePodAPI{..} RespLogin{..} = do
 
             if null (searchResults respGetLatestLessons)
               then
-                liftIO $ putStrLn $ "Done"
+                liftIO $ putStrLn "Done"
               else do
                 liftIO $ encodeFile pageFile respGetLatestLessons
                 go (page + 1)
@@ -60,6 +61,42 @@ downloadIndex ChinesePodAPI{..} RespLogin{..} = do
 
     resultsPerPage :: Int
     resultsPerPage = 10
+
+-- | Download lesson content
+downloadContent :: ChinesePodAPI -> RespLogin -> EitherT ServantError IO ()
+downloadContent ChinesePodAPI{..} RespLogin{..} = do
+    liftIO $ createDirectoryIfMissing True "./content"
+    goPage 0
+  where
+    goPage :: Int -> EitherT ServantError IO ()
+    goPage pageNum = do
+        pageExists <- liftIO $ doesFileExist pageFile
+        if not pageExists
+          then liftIO $ putStrLn "Done"
+          else do
+            page <- liftIO $ decodeFile pageFile
+            mapM_ (goLesson . snd) (Map.toList (searchResults page))
+            goPage (pageNum + 1)
+      where
+        pageFile = "./index/" ++ printf "%04d" pageNum
+
+    goLesson :: Lesson -> EitherT ServantError IO ()
+    goLesson Lesson{lessonV3Id = V3Id lessonId} = do
+       lessonExists <- liftIO $ doesFileExist lessonFile
+       if lessonExists
+         then do
+           liftIO $ putStrLn $ "Skipping lesson " ++ lessonId
+         else do
+           liftIO $ putStrLn $ "Downloading lesson " ++ lessonId
+           content <- cpodGetLesson ReqGetLesson {
+               reqGetLessonAccessToken = respLoginAccessToken
+             , reqGetLessonUserId      = respLoginUserId
+             , reqGetLessonV3Id        = V3Id lessonId
+             , reqGetLessonType        = Nothing
+             }
+           liftIO $ encodeFile lessonFile content
+      where
+        lessonFile = "./content/" ++ lessonId
 
 client :: ChinesePodAPI -> ReqLogin -> Command -> EitherT ServantError IO ()
 client cpodAPI@ChinesePodAPI{..} reqLogin cmd = do
