@@ -556,7 +556,7 @@ data Example = Example {
     , exampleId            :: String
     , examplePinyin        :: String
     , exampleSource        :: String
-    , exampleSourceT       :: String
+    , exampleSourceT       :: Maybe String
     , exampleTarget        :: String
     }
   deriving (Show, Generic)
@@ -800,13 +800,13 @@ instance FromJSON GrammarSentence where
 
 instance FromJSON Example where
     parseJSON = withObject "Example" $ \obj -> do
-      exampleAudio         <- obj .: "audio"
-      exampleExpansionWord <- obj .: "expansion_word"
-      exampleId            <- obj .: "id"
-      examplePinyin        <- obj .: "pinyin"
-      exampleSource        <- obj .: "source"
-      exampleSourceT       <- obj .: "source_t"
-      exampleTarget        <- obj .: "target"
+      exampleAudio         <- obj .:  "audio"
+      exampleExpansionWord <- obj .:  "expansion_word"
+      exampleId            <- obj .:  "id"
+      examplePinyin        <- obj .:  "pinyin"
+      exampleSource        <- obj .:  "source"
+      exampleSourceT       <- obj .:? "source_t"
+      exampleTarget        <- obj .:  "target"
       return Example{..}
 
 instance FromJSON Vocabulary where
