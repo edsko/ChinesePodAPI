@@ -450,7 +450,7 @@ data LessonContent = LessonContent {
     , lessonContentDialogueMp3          :: Maybe String
     , lessonContentReviewMp3            :: Maybe String
     , lessonContentCommentCount         :: Int
-    , lessonContentVideoLesson          :: Bool
+    , lessonContentVideoLesson          :: Maybe Bool
     , lessonContentAccessLevel          :: String
     , lessonContentBookMarked           :: Bool
     , lessonContentMarkAsStudied        :: Bool
@@ -481,7 +481,7 @@ data Sentence = Sentence {
     , sentenceRow3          :: String
     , sentenceRow4          :: String
     , sentenceSource        :: String
-    , sentenceSourceT       :: String
+    , sentenceSourceT       :: Maybe String
     , sentenceSpeaker       :: String
     , sentenceTarget        :: String
     , sentenceVocabulary    :: String
@@ -527,25 +527,25 @@ data GrammarPoint = GrammarPoint {
 
 data GrammarSentence = GrammarSentence {
       grammarSentenceAudio             :: String
-    , grammarSentenceCreateTime        :: String
+    , grammarSentenceCreateTime        :: Maybe String
     , grammarSentenceDescription       :: String
-    , grammarSentenceDisplaySort       :: Int
-    , grammarSentenceGrammarBlockId    :: String
+    , grammarSentenceDisplaySort       :: Maybe Int
+    , grammarSentenceGrammarBlockId    :: Maybe String
     , grammarSentenceGrammarId         :: String
-    , grammarSentenceGrammarSentenceId :: String
-    , grammarSentenceIsCorrect         :: Bool
+    , grammarSentenceGrammarSentenceId :: Maybe String
+    , grammarSentenceIsCorrect         :: Maybe Bool
     , grammarSentencePinyin            :: String
     , grammarSentenceSource            :: String
-    , grammarSentenceSourceAudio       :: String
+    , grammarSentenceSourceAudio       :: Maybe String
     , grammarSentenceSourceT           :: String
-    , grammarSentenceSourceTrad        :: String
+    , grammarSentenceSourceTrad        :: Maybe String
     , grammarSentenceSummary           :: String
-    , grammarSentenceTarget            :: String
-    , grammarSentenceTargetAnnotate    :: String
-    , grammarSentenceTargetAudio       :: String
-    , grammarSentenceTargetTrad        :: String
-    , grammarSentenceTips              :: String
-    , grammarSentenceUpdateTime        :: String
+    , grammarSentenceTarget            :: Maybe String
+    , grammarSentenceTargetAnnotate    :: Maybe String
+    , grammarSentenceTargetAudio       :: Maybe String
+    , grammarSentenceTargetTrad        :: Maybe String
+    , grammarSentenceTips              :: Maybe String
+    , grammarSentenceUpdateTime        :: Maybe String
     , grammarSentenceWords             :: [Word]
     }
   deriving (Show, Generic)
@@ -699,7 +699,7 @@ instance FromJSON LessonContent where
       lessonContentDialogueMp3          <- obj .:? "dialogue_mp3"
       lessonContentReviewMp3            <- obj .:? "review_mp3"
       lessonContentCommentCount         <- obj .:~ "comment_count"
-      lessonContentVideoLesson          <- obj .:  "video_lesson"
+      lessonContentVideoLesson          <- obj .:? "video_lesson"
       lessonContentAccessLevel          <- obj .:  "access_level"
       lessonContentBookMarked           <- obj .:~ "book_marked"
       lessonContentMarkAsStudied        <- obj .:~ "mark_as_studied"
@@ -730,7 +730,7 @@ instance FromJSON Sentence where
       sentenceRow3          <- obj .:  "row_3"
       sentenceRow4          <- obj .:  "row_4"
       sentenceSource        <- obj .:  "source"
-      sentenceSourceT       <- obj .:  "source_t"
+      sentenceSourceT       <- obj .:? "source_t"
       sentenceSpeaker       <- obj .:  "speaker"
       sentenceTarget        <- obj .:  "target"
       sentenceVocabulary    <- obj .:  "vocabulary"
@@ -775,27 +775,27 @@ instance FromJSON GrammarPoint where
 
 instance FromJSON GrammarSentence where
     parseJSON = withObject "GrammarSentence" $ \obj -> do
-      grammarSentenceAudio             <- obj .:  "audio"
-      grammarSentenceCreateTime        <- obj .:  "create_time"
-      grammarSentenceDescription       <- obj .:  "description"
-      grammarSentenceDisplaySort       <- obj .:~ "display_sort"
-      grammarSentenceGrammarBlockId    <- obj .:  "grammar_block_id"
-      grammarSentenceGrammarId         <- obj .:  "grammar_id"
-      grammarSentenceGrammarSentenceId <- obj .:  "grammar_sentence_id"
-      grammarSentenceIsCorrect         <- obj .:~ "is_correct"
-      grammarSentencePinyin            <- obj .:  "pinyin"
-      grammarSentenceSource            <- obj .:  "source"
-      grammarSentenceSourceAudio       <- obj .:  "source_audio"
-      grammarSentenceSourceT           <- obj .:  "source_t"
-      grammarSentenceSourceTrad        <- obj .:  "source_trad"
-      grammarSentenceSummary           <- obj .:  "summary"
-      grammarSentenceTarget            <- obj .:  "target"
-      grammarSentenceTargetAnnotate    <- obj .:  "target_annotate"
-      grammarSentenceTargetAudio       <- obj .:  "target_audio"
-      grammarSentenceTargetTrad        <- obj .:  "target_trad"
-      grammarSentenceTips              <- obj .:  "tips"
-      grammarSentenceUpdateTime        <- obj .:  "update_time"
-      grammarSentenceWords             <- obj .:  "words"
+      grammarSentenceAudio             <- obj .:   "audio"
+      grammarSentenceCreateTime        <- obj .:?  "create_time"
+      grammarSentenceDescription       <- obj .:   "description"
+      grammarSentenceDisplaySort       <- obj .:?~ "display_sort"
+      grammarSentenceGrammarBlockId    <- obj .:?  "grammar_block_id"
+      grammarSentenceGrammarId         <- obj .:   "grammar_id"
+      grammarSentenceGrammarSentenceId <- obj .:?  "grammar_sentence_id"
+      grammarSentenceIsCorrect         <- obj .:?~ "is_correct"
+      grammarSentencePinyin            <- obj .:   "pinyin"
+      grammarSentenceSource            <- obj .:   "source"
+      grammarSentenceSourceAudio       <- obj .:?  "source_audio"
+      grammarSentenceSourceT           <- obj .:   "source_t"
+      grammarSentenceSourceTrad        <- obj .:?  "source_trad"
+      grammarSentenceSummary           <- obj .:   "summary"
+      grammarSentenceTarget            <- obj .:?  "target"
+      grammarSentenceTargetAnnotate    <- obj .:?  "target_annotate"
+      grammarSentenceTargetAudio       <- obj .:?  "target_audio"
+      grammarSentenceTargetTrad        <- obj .:?  "target_trad"
+      grammarSentenceTips              <- obj .:?  "tips"
+      grammarSentenceUpdateTime        <- obj .:?  "update_time"
+      grammarSentenceWords             <- obj .:   "words"
       return GrammarSentence{..}
 
 instance FromJSON Example where
