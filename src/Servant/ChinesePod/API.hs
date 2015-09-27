@@ -59,8 +59,10 @@ import Control.Monad
 import Crypto.Hash
 import Data.Aeson.Types hiding ((.:?))
 import Data.Binary (Binary)
+import Data.List (sortBy)
 import Data.Map (Map)
 import Data.Maybe (catMaybes)
+import Data.Ord (comparing)
 import Data.Proxy
 import Data.Text (Text)
 import Data.Typeable
@@ -801,7 +803,7 @@ instance FromJSON GrammarSentence where
 instance FromJSON Example where
     parseJSON = withObject "Example" $ \obj -> do
       exampleAudio         <- obj .:  "audio"
-      exampleExpansionWord <- obj .:  "expansion_word"
+      exampleExpansionWord <- maybeIndexed <$> obj .:  "expansion_word"
       exampleId            <- obj .:  "id"
       examplePinyin        <- obj .:  "pinyin"
       exampleSource        <- obj .:  "source"
@@ -1001,6 +1003,27 @@ obj .:~ key = strOrInt <$> obj .: key
 -- | Combination of '(.:?)' and '(.:~)'
 (.:?~) :: (Typeable a, FromStrOrInt a) => Object -> Text -> Parser (Maybe a)
 obj .:?~ key = fmap strOrInt <$> obj .:? key
+
+-- | A list that is either represented as a JSON list or as a JSON object with
+-- indices as keys
+newtype MaybeIndexed a = MaybeIndexed { maybeIndexed :: [a] }
+
+instance (Typeable a, FromJSON a) => FromJSON (MaybeIndexed a) where
+    parseJSON (Array arr) =
+        MaybeIndexed <$> mapM parseJSON (Vector.toList arr)
+
+    parseJSON (Object obj) = do
+        let rawResults = catMaybes $ map extractRaw (HashMap.toList obj)
+        MaybeIndexed <$> mapM parseJSON (sortRaw rawResults)
+      where
+        extractRaw :: (Text, Value) -> Maybe (Int, Value)
+        extractRaw (idx, val) = do idx' <- fromText idx ; return (idx', val)
+
+        sortRaw :: [(Int, Value)] -> [Value]
+        sortRaw = map snd . sortBy (comparing fst)
+
+    parseJSON val =
+        typeMismatch ("MaybeIndex " ++ show (typeOf (undefined :: a))) val
 
 {-------------------------------------------------------------------------------
   Binary instances
