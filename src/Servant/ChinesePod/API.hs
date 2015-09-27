@@ -4,38 +4,44 @@ module Servant.ChinesePod.API (
     -- * API specification
   , ChinesePod
     -- ** Account
-  , GetUserInfo
   , Login
   , Logout
+  , GetUserInfo
+    -- *** Request types
+  , ReqLogin(..)
+  , ReqLogout(..)
+  , ReqGetUserInfo(..)
+  , ReqSignature(..)
+    -- *** Response types
+  , RespLogin(..)
+  , RespGetUserInfo(..)
     -- ** Lesson
   , GetLesson
+    -- *** Request types
+  , ReqGetLesson(..)
     -- ** Library
   , GetLatestLessons
   , SearchLessons
-    -- * Request types
-  , ReqLogin(..)
-  , ReqSignature(..)
-  , ReqGetLesson(..)
-  , ReqSearchLessons(..)
+    -- *** Request types
   , ReqGetLatestLessons(..)
-    -- * Response types
-  , RespLogin(..)
+  , ReqSearchLessons(..)
+    -- *** Response types
+  , RespGetLatestLessons
   , RespSearchLessons
-    -- * Constructing requests from previous responses
-  , FromLogin(..)
     -- * ChinesePod specific datatypes
   , AccessToken(..)
-  , UserId(..)
-  , Level(..)
   , Lesson(..)
-  , LessonContent(..)
+  , LessonContentType(..)
+  , Level(..)
+  , UserId(..)
   , V3Id(..)
-    -- * Auxiliary dataypes used to define the API
+    -- * Auxiliary
+    -- ** Types
   , OK(..)
   , Undocumented
   , SearchResults(..)
   , StrOrInt(..)
-    -- * Auxiliary
+    -- ** Parsing combinators
   , tryRead
   , parseFailure
   ) where
@@ -76,8 +82,8 @@ type GetUserInfo      = Request ReqGetUserInfo      RespGetUserInfo
 
 type GetLesson        = Request ReqGetLesson        Value
 
-type SearchLessons    = Request ReqSearchLessons    RespSearchLessons
 type GetLatestLessons = Request ReqGetLatestLessons RespGetLatestLessons
+type SearchLessons    = Request ReqSearchLessons    RespSearchLessons
 
 type Request req resp = ReqBody '[FormUrlEncoded] req :> Post '[JSON] resp
 
@@ -114,7 +120,7 @@ data ReqGetLesson = ReqGetLesson {
       reqGetLessonAccessToken :: AccessToken
     , reqGetLessonUserId      :: UserId
     , reqGetLessonV3Id        :: V3Id
-    , reqGetLessonType        :: Maybe LessonContent
+    , reqGetLessonType        :: Maybe LessonContentType
     }
   deriving (Show)
 
@@ -338,7 +344,7 @@ data Lesson = Lesson {
     }
   deriving (Show)
 
-data LessonContent =
+data LessonContentType =
     LessonContentAll
   | LessonContentExercise
   | LessonContentVocabulary
@@ -377,14 +383,14 @@ instance FromJSON Lesson where
       lessonReviewMp3            <-              obj .:? "review_mp3"
       return Lesson{..}
 
-instance ToText LessonContent where
+instance ToText LessonContentType where
     toText LessonContentAll        = "all"
     toText LessonContentExercise   = "exercise"
     toText LessonContentVocabulary = "vocabulary"
     toText LessonContentDialogue   = "dialogue"
     toText LessonContentGrammar    = "grammar"
 
-instance FromText LessonContent where
+instance FromText LessonContentType where
     fromText "all"        = Just $ LessonContentAll
     fromText "exercise"   = Just $ LessonContentExercise
     fromText "vocabulary" = Just $ LessonContentVocabulary
@@ -457,25 +463,6 @@ instance FromStrOrInt (Maybe Level) where
       go 5 = Just $ Just LevelAdvanced
       go 6 = Just $ Just LevelMedia
       go _ = Nothing
-
-{-------------------------------------------------------------------------------
-  Many requests need information that got returned in the initial login
--------------------------------------------------------------------------------}
-
-class FromLogin a b where
-    fromLogin :: RespLogin -> b -> a
-
-instance FromLogin ReqLogout () where
-    fromLogin RespLogin{..} () = ReqLogout {
-        reqLogoutAccessToken = respLoginAccessToken
-      , reqLogoutUserId      = respLoginUserId
-      }
-
-instance FromLogin ReqGetUserInfo () where
-    fromLogin RespLogin{..} () = ReqGetUserInfo {
-        reqGetUserInfoAccessToken = respLoginAccessToken
-      , reqGetUserInfoUserId      = respLoginUserId
-      }
 
 {-------------------------------------------------------------------------------
   Values that can be encoded as either strings or as numbers

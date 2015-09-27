@@ -4,6 +4,7 @@ module Options (
   , OptionsSearch(..)
   , OptionsGetLesson(..)
   , getOptions
+  , FromLogin(..)
   ) where
 
 import Data.Typeable
@@ -46,13 +47,28 @@ data OptionsLatest = OptionsLatest {
 
 data OptionsGetLesson = OptionsGetLesson {
       optionsGetLessonV3Id :: V3Id
-    , optionsGetLessonType :: Maybe LessonContent
+    , optionsGetLessonType :: Maybe LessonContentType
     }
   deriving (Show)
 
 {-------------------------------------------------------------------------------
   Constructing requests
 -------------------------------------------------------------------------------}
+
+class FromLogin a b where
+    fromLogin :: RespLogin -> b -> a
+
+instance FromLogin ReqLogout () where
+    fromLogin RespLogin{..} () = ReqLogout {
+        reqLogoutAccessToken = respLoginAccessToken
+      , reqLogoutUserId      = respLoginUserId
+      }
+
+instance FromLogin ReqGetUserInfo () where
+    fromLogin RespLogin{..} () = ReqGetUserInfo {
+        reqGetUserInfoAccessToken = respLoginAccessToken
+      , reqGetUserInfoUserId      = respLoginUserId
+      }
 
 instance FromLogin ReqSearchLessons OptionsSearch where
     fromLogin RespLogin{..} OptionsSearch{..} = ReqSearchLessons {
