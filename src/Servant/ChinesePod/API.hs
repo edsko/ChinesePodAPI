@@ -358,6 +358,8 @@ data LessonContentType =
   | LessonContentGrammar
   deriving (Show, Generic)
 
+-- TODO: We currently don't parse the grammar
+-- (it doesn't appear to be set on any lessons?)
 data LessonContent = LessonContent {
       lessonContentContentId            :: String
     , lessonContentCreatedAt            :: String
@@ -453,7 +455,8 @@ data LessonContent = LessonContent {
     , lessonContentTeacherFeedback      :: Maybe String
     , lessonContentTopics               :: [String]
     , lessonContentFunctions            :: [String]
-    , lessonContentDialogue             :: [Sentence]
+    , lessonContentDialogue             :: Maybe [Sentence]
+    , lessonContentGrammar              :: Maybe Value
     }
   deriving (Show, Generic)
 
@@ -628,7 +631,8 @@ instance FromJSON LessonContent where
       lessonContentTeacherFeedback      <- nullable <$> obj .:? "teacher_feedback" .!= Nullable Nothing
       lessonContentTopics               <-              obj .:  "topics"
       lessonContentFunctions            <-              obj .:  "functions"
-      lessonContentDialogue             <-              obj .:  "dialogue"
+      lessonContentDialogue             <-              obj .:? "dialogue"
+      lessonContentGrammar              <- nullable <$> obj .:? "grammar"          .!= Nullable Nothing
       return LessonContent{..}
 
 instance FromJSON Sentence where
