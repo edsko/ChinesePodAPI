@@ -30,7 +30,9 @@ module Servant.ChinesePod.API (
   , RespSearchLessons
     -- * ChinesePod specific datatypes
   , AccessToken(..)
+  , Example
   , GrammarPoint(..)
+  , GrammarSentence(..)
   , Lesson(..)
   , LessonContent(..)
   , LessonContentType(..)
@@ -38,6 +40,7 @@ module Servant.ChinesePod.API (
   , Sentence(..)
   , UserId(..)
   , V3Id(..)
+  , Vocabulary
   , Word(..)
     -- * Auxiliary
     -- ** Types
@@ -461,6 +464,8 @@ data LessonContent = LessonContent {
     , lessonContentFunctions            :: [String]
     , lessonContentDialogue             :: Maybe [Sentence]
     , lessonContentGrammar              :: Maybe [GrammarPoint]
+    , lessonContentExpansion            :: Maybe (Map String [Example])
+    , lessonContentVocabulary           :: Maybe Vocabulary
     }
   deriving (Show, Generic)
 
@@ -482,14 +487,17 @@ data Sentence = Sentence {
   deriving (Show, Generic)
 
 data Word = Word {
-      wordV3Id    :: Maybe V3Id
-    , wordAudio   :: Maybe String
-    , wordId      :: Maybe String
-    , wordPinyin  :: String
-    , wordSource  :: String
-    , wordSourceT :: String
-    , wordTarget  :: String
-    , wordVcid    :: Maybe String
+      wordV3Id            :: Maybe V3Id
+    , wordAudio           :: Maybe String
+    , wordId              :: Maybe String
+    , wordPinyin          :: String
+    , wordSource          :: String
+    , wordSourceT         :: String
+    , wordTarget          :: String
+    , wordVcid            :: Maybe String
+    , wordImage           :: Maybe String
+    , wordDisplayOrder    :: Maybe Int
+    , wordVocabularyClass :: Maybe String
     }
   deriving (Show, Generic)
 
@@ -536,6 +544,23 @@ data GrammarSentence = GrammarSentence {
     , grammarSentenceTips              :: String
     , grammarSentenceUpdateTime        :: String
     , grammarSentenceWords             :: [Word]
+    }
+  deriving (Show, Generic)
+
+data Example = Example {
+      exampleAudio         :: String
+    , exampleExpansionWord :: [Word]
+    , exampleId            :: String
+    , examplePinyin        :: String
+    , exampleSource        :: String
+    , exampleSourceT       :: String
+    , exampleTarget        :: String
+    }
+  deriving (Show, Generic)
+
+data Vocabulary = Vocabulary {
+      vocabularyKeyVocab :: [Word]
+    , vocabularySupVocab :: [Word]
     }
   deriving (Show, Generic)
 
@@ -683,6 +708,8 @@ instance FromJSON LessonContent where
       lessonContentFunctions            <- obj .:  "functions"
       lessonContentDialogue             <- obj .:? "dialogue"
       lessonContentGrammar              <- obj .:? "grammar"
+      lessonContentExpansion            <- obj .:? "expansion"
+      lessonContentVocabulary           <- obj .:? "vocabulary"
       return LessonContent{..}
 
 instance FromJSON Sentence where
@@ -704,14 +731,17 @@ instance FromJSON Sentence where
 
 instance FromJSON Word where
     parseJSON = withObject "Word" $ \obj -> do
-      wordV3Id    <- obj .:? "v3_id"
-      wordAudio   <- obj .:? "audio"
-      wordId      <- obj .:? "id"
-      wordPinyin  <- obj .:  "pinyin"
-      wordSource  <- obj .:  "source"
-      wordSourceT <- obj .:  "source_t"
-      wordTarget  <- obj .:  "target"
-      wordVcid    <- obj .:? "vcid"
+      wordV3Id            <- obj .:?  "v3_id"
+      wordAudio           <- obj .:?  "audio"
+      wordId              <- obj .:?  "id"
+      wordPinyin          <- obj .:   "pinyin"
+      wordSource          <- obj .:   "source"
+      wordSourceT         <- obj .:   "source_t"
+      wordTarget          <- obj .:   "target"
+      wordVcid            <- obj .:?  "vcid"
+      wordImage           <- obj .:?  "image"
+      wordDisplayOrder    <- obj .:?~ "display_order"
+      wordVocabularyClass <- obj .:?  "vocabulary_class"
       return Word{..}
 
 instance FromJSON GrammarPoint where
@@ -759,6 +789,23 @@ instance FromJSON GrammarSentence where
       grammarSentenceUpdateTime        <- obj .:  "update_time"
       grammarSentenceWords             <- obj .:  "words"
       return GrammarSentence{..}
+
+instance FromJSON Example where
+    parseJSON = withObject "Example" $ \obj -> do
+      exampleAudio         <- obj .: "audio"
+      exampleExpansionWord <- obj .: "expansion_word"
+      exampleId            <- obj .: "id"
+      examplePinyin        <- obj .: "pinyin"
+      exampleSource        <- obj .: "source"
+      exampleSourceT       <- obj .: "source_t"
+      exampleTarget        <- obj .: "target"
+      return Example{..}
+
+instance FromJSON Vocabulary where
+    parseJSON = withObject "Vocabulary" $ \obj -> do
+      vocabularyKeyVocab <- obj .: "key_vocab"
+      vocabularySupVocab <- obj .: "sup_vocab"
+      return Vocabulary{..}
 
 {-------------------------------------------------------------------------------
   String/int encoding for specific types
@@ -924,6 +971,10 @@ obj .:? key = case HashMap.lookup key obj of
 (.:~) :: (Typeable a, FromStrOrInt a) => Object -> Text -> Parser a
 obj .:~ key = strOrInt <$> obj .: key
 
+-- | Combination of '(.:?)' and '(.:~)'
+(.:?~) :: (Typeable a, FromStrOrInt a) => Object -> Text -> Parser (Maybe a)
+obj .:?~ key = fmap strOrInt <$> obj .:? key
+
 {-------------------------------------------------------------------------------
   PrettyVal instances
 -------------------------------------------------------------------------------}
@@ -939,6 +990,7 @@ instance PrettyVal RespGetUserInfo
 instance PrettyVal RespLogin
 
 instance PrettyVal AccessToken
+instance PrettyVal Example
 instance PrettyVal GrammarPoint
 instance PrettyVal GrammarSentence
 instance PrettyVal Lesson
@@ -949,6 +1001,7 @@ instance PrettyVal OK
 instance PrettyVal Sentence
 instance PrettyVal UserId
 instance PrettyVal V3Id
+instance PrettyVal Vocabulary
 instance PrettyVal Word
 
 instance PrettyVal a => PrettyVal (SearchResults a)
