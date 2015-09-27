@@ -30,12 +30,15 @@ module Servant.ChinesePod.API (
   , RespSearchLessons
     -- * ChinesePod specific datatypes
   , AccessToken(..)
+  , GrammarPoint(..)
   , Lesson(..)
   , LessonContent(..)
   , LessonContentType(..)
   , Level(..)
+  , Sentence(..)
   , UserId(..)
   , V3Id(..)
+  , Word(..)
     -- * Auxiliary
     -- ** Types
   , OK(..)
@@ -457,7 +460,7 @@ data LessonContent = LessonContent {
     , lessonContentTopics               :: [String]
     , lessonContentFunctions            :: [String]
     , lessonContentDialogue             :: Maybe [Sentence]
-    , lessonContentGrammar              :: Maybe Value
+    , lessonContentGrammar              :: Maybe [GrammarPoint]
     }
   deriving (Show, Generic)
 
@@ -487,6 +490,52 @@ data Word = Word {
     , wordSourceT :: String
     , wordTarget  :: String
     , wordVcid    :: Maybe String
+    }
+  deriving (Show, Generic)
+
+data GrammarPoint = GrammarPoint {
+      grammarPointCreateTime     :: String
+    , grammarPointDisplayLayer   :: Int
+    , grammarPointDisplaySort    :: Int
+    , grammarPointDisplayType    :: String
+    , grammarPointGrammarId      :: String
+    , grammarPointImage          :: String
+    , grammarPointIntroduction   :: String
+    , grammarPointLevel          :: Maybe Level
+    , grammarPointName           :: String
+    , grammarPointParentId       :: String
+    , grammarPointPath           :: String
+    , grammarPointProductionId   :: String
+    , grammarPointRelatedGrammar :: String
+    , grammarPointSentences      :: [GrammarSentence]
+    , grammarPointSummary        :: String
+    , grammarPointTree           :: String
+    , grammarPointUpdateTime     :: String
+    }
+  deriving (Show, Generic)
+
+data GrammarSentence = GrammarSentence {
+      grammarSentenceAudio             :: String
+    , grammarSentenceCreateTime        :: String
+    , grammarSentenceDescription       :: String
+    , grammarSentenceDisplaySort       :: Int
+    , grammarSentenceGrammarBlockId    :: String
+    , grammarSentenceGrammarId         :: String
+    , grammarSentenceGrammarSentenceId :: String
+    , grammarSentenceIsCorrect         :: Bool
+    , grammarSentencePinyin            :: String
+    , grammarSentenceSource            :: String
+    , grammarSentenceSourceAudio       :: String
+    , grammarSentenceSourceT           :: String
+    , grammarSentenceSourceTrad        :: String
+    , grammarSentenceSummary           :: String
+    , grammarSentenceTarget            :: String
+    , grammarSentenceTargetAnnotate    :: String
+    , grammarSentenceTargetAudio       :: String
+    , grammarSentenceTargetTrad        :: String
+    , grammarSentenceTips              :: String
+    , grammarSentenceUpdateTime        :: String
+    , grammarSentenceWords             :: [Word]
     }
   deriving (Show, Generic)
 
@@ -664,6 +713,52 @@ instance FromJSON Word where
       wordTarget  <- obj .:  "target"
       wordVcid    <- obj .:? "vcid"
       return Word{..}
+
+instance FromJSON GrammarPoint where
+    parseJSON = withObject "GrammarPoint" $ \obj -> do
+      grammarPointCreateTime     <- obj .:  "create_time"
+      grammarPointDisplayLayer   <- obj .:~ "display_layer"
+      grammarPointDisplaySort    <- obj .:~ "display_sort"
+      grammarPointDisplayType    <- obj .:  "display_type"
+      grammarPointGrammarId      <- obj .:  "grammar_id"
+      grammarPointImage          <- obj .:  "image"
+      grammarPointIntroduction   <- obj .:  "introduction"
+      grammarPointLevel          <- obj .:~ "level_name"
+      grammarPointName           <- obj .:  "name"
+      grammarPointParentId       <- obj .:  "parent_id"
+      grammarPointPath           <- obj .:  "path"
+      grammarPointProductionId   <- obj .:  "production_id"
+      grammarPointRelatedGrammar <- obj .:  "related_grammar"
+      grammarPointSentences      <- obj .:  "sentences"
+      grammarPointSummary        <- obj .:  "summary"
+      grammarPointTree           <- obj .:  "tree"
+      grammarPointUpdateTime     <- obj .:  "update_time"
+      return GrammarPoint{..}
+
+instance FromJSON GrammarSentence where
+    parseJSON = withObject "GrammarSentence" $ \obj -> do
+      grammarSentenceAudio             <- obj .:  "audio"
+      grammarSentenceCreateTime        <- obj .:  "create_time"
+      grammarSentenceDescription       <- obj .:  "description"
+      grammarSentenceDisplaySort       <- obj .:~ "display_sort"
+      grammarSentenceGrammarBlockId    <- obj .:  "grammar_block_id"
+      grammarSentenceGrammarId         <- obj .:  "grammar_id"
+      grammarSentenceGrammarSentenceId <- obj .:  "grammar_sentence_id"
+      grammarSentenceIsCorrect         <- obj .:~ "is_correct"
+      grammarSentencePinyin            <- obj .:  "pinyin"
+      grammarSentenceSource            <- obj .:  "source"
+      grammarSentenceSourceAudio       <- obj .:  "source_audio"
+      grammarSentenceSourceT           <- obj .:  "source_t"
+      grammarSentenceSourceTrad        <- obj .:  "source_trad"
+      grammarSentenceSummary           <- obj .:  "summary"
+      grammarSentenceTarget            <- obj .:  "target"
+      grammarSentenceTargetAnnotate    <- obj .:  "target_annotate"
+      grammarSentenceTargetAudio       <- obj .:  "target_audio"
+      grammarSentenceTargetTrad        <- obj .:  "target_trad"
+      grammarSentenceTips              <- obj .:  "tips"
+      grammarSentenceUpdateTime        <- obj .:  "update_time"
+      grammarSentenceWords             <- obj .:  "words"
+      return GrammarSentence{..}
 
 {-------------------------------------------------------------------------------
   String/int encoding for specific types
@@ -844,6 +939,8 @@ instance PrettyVal RespGetUserInfo
 instance PrettyVal RespLogin
 
 instance PrettyVal AccessToken
+instance PrettyVal GrammarPoint
+instance PrettyVal GrammarSentence
 instance PrettyVal Lesson
 instance PrettyVal LessonContent
 instance PrettyVal LessonContentType
