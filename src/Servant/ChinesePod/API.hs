@@ -49,17 +49,21 @@ module Servant.ChinesePod.API (
 
 import Crypto.Hash
 import Data.Aeson.Types
+import GHC.Generics
 import Data.Map (Map)
 import Data.Maybe (catMaybes)
 import Data.Proxy
 import Data.Text (Text)
 import Data.Typeable
 import Servant.API
+import Text.Show.Pretty (PrettyVal(..))
 import qualified Data.ByteString      as BS
 import qualified Data.ByteString.UTF8 as BS.UTF8
 import qualified Data.HashMap.Strict  as HashMap
 import qualified Data.Map             as Map
 import qualified Data.Text            as T
+
+import Servant.ChinesePod.Util.Orphans.PrettyVal ()
 
 api :: Proxy ChinesePod
 api = Proxy
@@ -97,25 +101,25 @@ data ReqLogin = ReqLogin {
     , reqLoginEmail     :: String
     , reqLoginSignature :: ReqSignature
     }
-  deriving (Show)
+  deriving (Show, Generic)
 
 data ReqSignature = ReqSignature {
       reqSignatureClientSecret :: String
     , reqSignatureUserPassword :: String
     }
-  deriving (Show)
+  deriving (Show, Generic)
 
 data ReqLogout = ReqLogout {
       reqLogoutAccessToken :: AccessToken
     , reqLogoutUserId      :: UserId
     }
-  deriving (Show)
+  deriving (Show, Generic)
 
 data ReqGetUserInfo = ReqGetUserInfo {
       reqGetUserInfoAccessToken :: AccessToken
     , reqGetUserInfoUserId      :: UserId
     }
-  deriving (Show)
+  deriving (Show, Generic)
 
 data ReqGetLesson = ReqGetLesson {
       reqGetLessonAccessToken :: AccessToken
@@ -123,7 +127,7 @@ data ReqGetLesson = ReqGetLesson {
     , reqGetLessonV3Id        :: V3Id
     , reqGetLessonType        :: Maybe LessonContentType
     }
-  deriving (Show)
+  deriving (Show, Generic)
 
 data ReqSearchLessons = ReqSearchLessons {
       reqSearchLessonsAccessToken :: AccessToken
@@ -133,7 +137,7 @@ data ReqSearchLessons = ReqSearchLessons {
     , reqSearchLessonsNumResults  :: Maybe Int
     , reqSearchLessonsPage        :: Maybe Int
     }
-  deriving (Show)
+  deriving (Show, Generic)
 
 data ReqGetLatestLessons = ReqGetLatestLessons {
       reqGetLatestLessonsAccessToken :: AccessToken
@@ -143,7 +147,7 @@ data ReqGetLatestLessons = ReqGetLatestLessons {
     , reqGetLatestLessonsLang        :: Maybe String
     , reqGetLatestLessonsLevelId     :: Maybe Level
     }
-  deriving (Show)
+  deriving (Show, Generic)
 
 {-------------------------------------------------------------------------------
   Responses
@@ -168,7 +172,7 @@ data RespLogin = RespLogin {
     , respLoginSubscribedLessons      :: Int
     , respLoginStudiedLessons         :: Int
     }
-  deriving (Show)
+  deriving (Show, Generic)
 
 data RespGetUserInfo = RespGetUserInfo {
       respGetUserInfoName                     :: String
@@ -184,7 +188,7 @@ data RespGetUserInfo = RespGetUserInfo {
     , respGetUserInfoLevel                    :: Maybe Level
     , respGetUserInfoType                     :: Undocumented String
     }
-  deriving (Show)
+  deriving (Show, Generic)
 
 type RespSearchLessons    = SearchResults Lesson
 type RespGetLatestLessons = SearchResults Lesson
@@ -303,17 +307,17 @@ instance FromJSON RespGetUserInfo where
 -------------------------------------------------------------------------------}
 
 newtype UserId = UserId String
-  deriving (Show, Eq, Ord, FromJSON, ToText, FromText)
+  deriving (Show, Generic, Eq, Ord, FromJSON, ToText, FromText)
 
 newtype AccessToken = AccessToken String
-  deriving (Show, Eq, Ord, FromJSON, ToText, FromText)
+  deriving (Show, Generic, Eq, Ord, FromJSON, ToText, FromText)
 
 newtype V3Id = V3Id String
-  deriving (Show, Eq, Ord, FromJSON, ToText, FromText)
+  deriving (Show, Generic, Eq, Ord, FromJSON, ToText, FromText)
 
 -- | Some ChinesePod requests simply return OK
 data OK = OK
-  deriving (Show)
+  deriving (Show, Generic)
 
 -- | User level
 data Level =
@@ -323,7 +327,7 @@ data Level =
   | LevelUpperIntermediate
   | LevelAdvanced
   | LevelMedia
-  deriving (Show)
+  deriving (Show, Generic)
 
 data Lesson = Lesson {
       lessonV3Id                 :: V3Id
@@ -343,7 +347,7 @@ data Lesson = Lesson {
     , lessonDialogueMp3          :: Maybe String
     , lessonReviewMp3            :: Maybe String
     }
-  deriving (Show)
+  deriving (Show, Generic)
 
 data LessonContentType =
     LessonContentAll
@@ -351,7 +355,7 @@ data LessonContentType =
   | LessonContentVocabulary
   | LessonContentDialogue
   | LessonContentGrammar
-  deriving (Show)
+  deriving (Show, Generic)
 
 data LessonContent = LessonContent {
       lessonContentContentId            :: String
@@ -449,7 +453,7 @@ data LessonContent = LessonContent {
     , lessonContentTopics               :: [String]
     , lessonContentFunctions            :: [String]
     }
-  deriving (Show)
+  deriving (Show, Generic)
 
 instance FromJSON LessonContent where
     parseJSON = withObject "LessonContent" $ \obj -> do
@@ -708,7 +712,7 @@ data SearchResults a = SearchResults {
       searchResults      :: Map Int a
     , searchResultsTotal :: Int
     }
-  deriving (Show)
+  deriving (Show, Generic)
 
 instance FromJSON a => FromJSON (SearchResults a) where
     parseJSON = withObject "SearchResults" $ \obj -> do
@@ -758,3 +762,28 @@ tryRead strA =
 parseFailure :: forall a m. (Typeable a, Monad m) => Text -> m a
 parseFailure inp = fail $ "Could not parse " ++ show inp ++ " "
                        ++ "as " ++ show (typeOf (undefined :: a))
+
+{-------------------------------------------------------------------------------
+  PrettyVal instances
+-------------------------------------------------------------------------------}
+
+instance PrettyVal ReqLogin
+instance PrettyVal ReqLogout
+instance PrettyVal ReqGetUserInfo
+instance PrettyVal ReqSignature
+instance PrettyVal RespLogin
+instance PrettyVal RespGetUserInfo
+instance PrettyVal ReqGetLesson
+instance PrettyVal ReqGetLatestLessons
+instance PrettyVal ReqSearchLessons
+
+instance PrettyVal AccessToken
+instance PrettyVal Lesson
+instance PrettyVal LessonContent
+instance PrettyVal LessonContentType
+instance PrettyVal Level
+instance PrettyVal UserId
+instance PrettyVal V3Id
+instance PrettyVal OK
+
+instance PrettyVal a => PrettyVal (SearchResults a)

@@ -1,5 +1,6 @@
 module Main (main) where
 
+import Text.Show.Pretty
 import Servant.ChinesePod.API
 import Servant.ChinesePod.Client
 
@@ -11,19 +12,21 @@ exec ChinesePodAPI{..} respLogin = go
     go :: Command -> EitherT ServantError IO ()
     go (CommandSearch opts) = do
       respSearchLessons <- cpodSearchLessons $ fromLogin respLogin opts
-      liftIO $ print respSearchLessons
+      liftIO $ putStrLn $ dumpStr respSearchLessons
     go (CommandLatest opts) = do
       respGetLatestLessons <- cpodGetLatestLessons $ fromLogin respLogin opts
-      liftIO $ print respGetLatestLessons
+      liftIO $ putStrLn $ dumpStr respGetLatestLessons
     go (CommandGetLesson opts) = do
       respGetLesson <- cpodGetLesson $ fromLogin respLogin opts
-      liftIO $ print respGetLesson
+      liftIO $ putStrLn $ dumpStr respGetLesson
 
 client :: ChinesePodAPI -> ReqLogin -> Command -> EitherT ServantError IO ()
 client cpodAPI@ChinesePodAPI{..} reqLogin cmd = do
     respLogin <- cpodLogin reqLogin
+    liftIO $ putStrLn $ dumpStr respLogin
     exec cpodAPI respLogin cmd
     OK <- cpodLogout $ fromLogin respLogin ()
+    liftIO $ putStrLn $ dumpStr OK
     return ()
 
 main :: IO ()
