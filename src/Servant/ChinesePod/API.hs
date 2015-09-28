@@ -25,9 +25,6 @@ module Servant.ChinesePod.API (
     -- *** Request types
   , ReqGetLatestLessons(..)
   , ReqSearchLessons(..)
-    -- *** Response types
-  , RespGetLatestLessons
-  , RespSearchLessons
     -- * ChinesePod specific datatypes
   , AccessToken(..)
   , Example
@@ -101,8 +98,8 @@ type GetUserInfo      = Request ReqGetUserInfo      RespGetUserInfo
 
 type GetLesson        = Request ReqGetLesson        LessonContent
 
-type GetLatestLessons = Request ReqGetLatestLessons RespGetLatestLessons
-type SearchLessons    = Request ReqSearchLessons    RespSearchLessons
+type GetLatestLessons = Request ReqGetLatestLessons (SearchResults Lesson)
+type SearchLessons    = Request ReqSearchLessons    (SearchResults Lesson)
 
 type Request req resp = ReqBody '[FormUrlEncoded] req :> Post '[JSON] resp
 
@@ -203,118 +200,6 @@ data RespGetUserInfo = RespGetUserInfo {
     , respGetUserInfoType                     :: Undocumented String
     }
   deriving (Show, Generic)
-
-type RespSearchLessons    = SearchResults Lesson
-type RespGetLatestLessons = SearchResults Lesson
-
-{-------------------------------------------------------------------------------
-  Encoding requests
--------------------------------------------------------------------------------}
-
--- | The 'ToText' instance for 'ReqSignature' is the hash
-instance ToText ReqSignature where
-    toText ReqSignature{..} =
-        toText . show . sha1 . BS.UTF8.fromString $ concat [
-            reqSignatureClientSecret
-          , reqSignatureUserPassword
-          ]
-      where
-        sha1 :: BS.ByteString -> Digest SHA1
-        sha1 = hash
-
-instance ToFormUrlEncoded ReqLogin where
-    toFormUrlEncoded ReqLogin{..} = [
-          ( "client_id" , toText reqLoginClientId  )
-        , ( "email"     , toText reqLoginEmail     )
-        , ( "signature" , toText reqLoginSignature )
-        ]
-
-instance ToFormUrlEncoded ReqLogout where
-    toFormUrlEncoded ReqLogout{..} = [
-          ( "access_token" , toText reqLogoutAccessToken )
-        , ( "user_id"      , toText reqLogoutUserId      )
-        ]
-
-instance ToFormUrlEncoded ReqGetUserInfo where
-    toFormUrlEncoded ReqGetUserInfo{..} = [
-          ( "access_token" , toText reqGetUserInfoAccessToken )
-        , ( "user_id"      , toText reqGetUserInfoUserId      )
-        ]
-
-instance ToFormUrlEncoded ReqSearchLessons where
-    toFormUrlEncoded ReqSearchLessons{..} = [
-          ( "access_token" , toText reqSearchLessonsAccessToken )
-        , ( "user_id"      , toText reqSearchLessonsUserId      )
-        , ( "search"       , toText reqSearchLessonsSearch      )
-        ] ++ catMaybes [
-          optFormArg "search_level" (toText . Str) reqSearchLessonsSearchLevel
-        , optFormArg "num_results"  (toText)       reqSearchLessonsNumResults
-        , optFormArg "page"         (toText)       reqSearchLessonsPage
-        ]
-
-instance ToFormUrlEncoded ReqGetLatestLessons where
-    toFormUrlEncoded ReqGetLatestLessons{..} = [
-          ( "access_token" , toText reqGetLatestLessonsAccessToken )
-        , ( "user_id"      , toText reqGetLatestLessonsUserId      )
-        ] ++ catMaybes [
-          optFormArg "page"     (toText)       reqGetLatestLessonsPage
-        , optFormArg "count"    (toText)       reqGetLatestLessonsCount
-        , optFormArg "lang"     (toText)       reqGetLatestLessonsLang
-        , optFormArg "level_id" (toText . Int) reqGetLatestLessonsLevelId
-        ]
-
-instance ToFormUrlEncoded ReqGetLesson where
-     toFormUrlEncoded ReqGetLesson{..} = [
-          ( "access_token" , toText reqGetLessonAccessToken )
-        , ( "user_id"      , toText reqGetLessonUserId      )
-        , ( "v3id"         , toText reqGetLessonV3Id        )
-        ] ++ catMaybes [
-          optFormArg "type" (toText) reqGetLessonType
-        ]
-
-optFormArg :: Text -> (a -> Text) -> Maybe a -> Maybe (Text, Text)
-optFormArg nm f = fmap $ \a -> (nm, f a)
-
-{-------------------------------------------------------------------------------
-  Decoding responses
--------------------------------------------------------------------------------}
-
-instance FromJSON RespLogin where
-    parseJSON = withObject "RespLogin" $ \obj -> do
-      respLoginAccessToken            <- obj .:  "access_token"
-      respLoginUserId                 <- obj .:  "user_id"
-      respLoginUsername               <- obj .:  "username"
-      respLoginName                   <- obj .:  "name"
-      respLoginSelfStudyLessonsTotal  <- obj .:~ "self_study_lessons_total"
-      respLoginAssignedLessonsTotal   <- obj .:  "assigned_lessons_total"
-      respLoginCoursesCount           <- obj .:~ "courses_count"
-      respLoginLang                   <- obj .:  "lang"
-      respLoginBio                    <- obj .:  "bio"
-      respLoginAvatarUrl              <- obj .:  "avatar_url"
-      respLoginNewLessonNotification  <- obj .:~ "new_lesson_notification"
-      respLoginNewShowNotification    <- obj .:~ "new_show_notification"
-      respLoginNewsletterNotification <- obj .:~ "newsletter_notification"
-      respLoginGeneralNotification    <- obj .:~ "general_notification"
-      respLoginBookmarkedLessons      <- obj .:  "bookmarked_lessons"
-      respLoginSubscribedLessons      <- obj .:  "subscribed_lessons"
-      respLoginStudiedLessons         <- obj .:  "studied_lessons"
-      return RespLogin{..}
-
-instance FromJSON RespGetUserInfo where
-    parseJSON = withObject "RespGetUserInfo" $ \obj -> do
-      respGetUserInfoName                     <- obj .:  "name"
-      respGetUserInfoUsername                 <- obj .:  "username"
-      respGetUserInfoAvatarUrl                <- obj .:  "avatar_url"
-      respGetUserInfoBio                      <- obj .:  "bio"
-      respGetUserInfoUseTraditionalCharacters <- obj .:~ "use_traditional_characters"
-      respGetUserInfoUserId                   <- obj .:~ "user_id"
-      respGetUserInfoNewLessonNotification    <- obj .:~ "new_lesson_notification"
-      respGetUserInfoNewShowNotification      <- obj .:~ "new_show_notification"
-      respGetUserInfoNewsletterNotification   <- obj .:~ "newsletter_notification"
-      respGetUserInfoGeneralNotification      <- obj .:~ "general_notification"
-      respGetUserInfoLevel                    <- obj .:~ "level"
-      respGetUserInfoType                     <- obj .:? "type"
-      return RespGetUserInfo{..}
 
 {-------------------------------------------------------------------------------
   ChinesePod specific datatypes
@@ -573,6 +458,115 @@ data Expansion = Expansion {
     expansion :: Map String [Example]
   }
   deriving (Show, Generic)
+
+{-------------------------------------------------------------------------------
+  Encoding requests
+-------------------------------------------------------------------------------}
+
+-- | The 'ToText' instance for 'ReqSignature' is the hash
+instance ToText ReqSignature where
+    toText ReqSignature{..} =
+        toText . show . sha1 . BS.UTF8.fromString $ concat [
+            reqSignatureClientSecret
+          , reqSignatureUserPassword
+          ]
+      where
+        sha1 :: BS.ByteString -> Digest SHA1
+        sha1 = hash
+
+instance ToFormUrlEncoded ReqLogin where
+    toFormUrlEncoded ReqLogin{..} = [
+          ( "client_id" , toText reqLoginClientId  )
+        , ( "email"     , toText reqLoginEmail     )
+        , ( "signature" , toText reqLoginSignature )
+        ]
+
+instance ToFormUrlEncoded ReqLogout where
+    toFormUrlEncoded ReqLogout{..} = [
+          ( "access_token" , toText reqLogoutAccessToken )
+        , ( "user_id"      , toText reqLogoutUserId      )
+        ]
+
+instance ToFormUrlEncoded ReqGetUserInfo where
+    toFormUrlEncoded ReqGetUserInfo{..} = [
+          ( "access_token" , toText reqGetUserInfoAccessToken )
+        , ( "user_id"      , toText reqGetUserInfoUserId      )
+        ]
+
+instance ToFormUrlEncoded ReqSearchLessons where
+    toFormUrlEncoded ReqSearchLessons{..} = [
+          ( "access_token" , toText reqSearchLessonsAccessToken )
+        , ( "user_id"      , toText reqSearchLessonsUserId      )
+        , ( "search"       , toText reqSearchLessonsSearch      )
+        ] ++ catMaybes [
+          optFormArg "search_level" (toText . Str) reqSearchLessonsSearchLevel
+        , optFormArg "num_results"  (toText)       reqSearchLessonsNumResults
+        , optFormArg "page"         (toText)       reqSearchLessonsPage
+        ]
+
+instance ToFormUrlEncoded ReqGetLatestLessons where
+    toFormUrlEncoded ReqGetLatestLessons{..} = [
+          ( "access_token" , toText reqGetLatestLessonsAccessToken )
+        , ( "user_id"      , toText reqGetLatestLessonsUserId      )
+        ] ++ catMaybes [
+          optFormArg "page"     (toText)       reqGetLatestLessonsPage
+        , optFormArg "count"    (toText)       reqGetLatestLessonsCount
+        , optFormArg "lang"     (toText)       reqGetLatestLessonsLang
+        , optFormArg "level_id" (toText . Int) reqGetLatestLessonsLevelId
+        ]
+
+instance ToFormUrlEncoded ReqGetLesson where
+     toFormUrlEncoded ReqGetLesson{..} = [
+          ( "access_token" , toText reqGetLessonAccessToken )
+        , ( "user_id"      , toText reqGetLessonUserId      )
+        , ( "v3id"         , toText reqGetLessonV3Id        )
+        ] ++ catMaybes [
+          optFormArg "type" (toText) reqGetLessonType
+        ]
+
+optFormArg :: Text -> (a -> Text) -> Maybe a -> Maybe (Text, Text)
+optFormArg nm f = fmap $ \a -> (nm, f a)
+
+{-------------------------------------------------------------------------------
+  Decoding responses
+-------------------------------------------------------------------------------}
+
+instance FromJSON RespLogin where
+    parseJSON = withObject "RespLogin" $ \obj -> do
+      respLoginAccessToken            <- obj .:  "access_token"
+      respLoginUserId                 <- obj .:  "user_id"
+      respLoginUsername               <- obj .:  "username"
+      respLoginName                   <- obj .:  "name"
+      respLoginSelfStudyLessonsTotal  <- obj .:~ "self_study_lessons_total"
+      respLoginAssignedLessonsTotal   <- obj .:  "assigned_lessons_total"
+      respLoginCoursesCount           <- obj .:~ "courses_count"
+      respLoginLang                   <- obj .:  "lang"
+      respLoginBio                    <- obj .:  "bio"
+      respLoginAvatarUrl              <- obj .:  "avatar_url"
+      respLoginNewLessonNotification  <- obj .:~ "new_lesson_notification"
+      respLoginNewShowNotification    <- obj .:~ "new_show_notification"
+      respLoginNewsletterNotification <- obj .:~ "newsletter_notification"
+      respLoginGeneralNotification    <- obj .:~ "general_notification"
+      respLoginBookmarkedLessons      <- obj .:  "bookmarked_lessons"
+      respLoginSubscribedLessons      <- obj .:  "subscribed_lessons"
+      respLoginStudiedLessons         <- obj .:  "studied_lessons"
+      return RespLogin{..}
+
+instance FromJSON RespGetUserInfo where
+    parseJSON = withObject "RespGetUserInfo" $ \obj -> do
+      respGetUserInfoName                     <- obj .:  "name"
+      respGetUserInfoUsername                 <- obj .:  "username"
+      respGetUserInfoAvatarUrl                <- obj .:  "avatar_url"
+      respGetUserInfoBio                      <- obj .:  "bio"
+      respGetUserInfoUseTraditionalCharacters <- obj .:~ "use_traditional_characters"
+      respGetUserInfoUserId                   <- obj .:~ "user_id"
+      respGetUserInfoNewLessonNotification    <- obj .:~ "new_lesson_notification"
+      respGetUserInfoNewShowNotification      <- obj .:~ "new_show_notification"
+      respGetUserInfoNewsletterNotification   <- obj .:~ "newsletter_notification"
+      respGetUserInfoGeneralNotification      <- obj .:~ "general_notification"
+      respGetUserInfoLevel                    <- obj .:~ "level"
+      respGetUserInfoType                     <- obj .:? "type"
+      return RespGetUserInfo{..}
 
 {-------------------------------------------------------------------------------
   Encoding/decoding ChinesePod types
