@@ -1,6 +1,7 @@
 module Options (
     Command(..)
   , Options(..)
+  , OptionsCPod(..)
   , OptionsSearch(..)
   , OptionsGetLesson(..)
   , getOptions
@@ -17,18 +18,23 @@ import Servant.ChinesePod.API
 import Servant.ChinesePod.Client
 
 data Options = Options {
+      optionsCommand  :: Command
+    }
+  deriving (Show)
+
+data OptionsCPod = OptionsCPod {
       optionsReqLogin :: ReqLogin
     , optionsBaseUrl  :: BaseUrl
-    , optionsCommand  :: Command
     }
   deriving (Show)
 
 data Command =
-    CommandSearch    OptionsSearch
-  | CommandLatest    OptionsLatest
-  | CommandGetLesson OptionsGetLesson
-  | CommandDownloadIndex
-  | CommandDownloadContent
+    CommandSearch          OptionsCPod OptionsSearch
+  | CommandLatest          OptionsCPod OptionsLatest
+  | CommandGetLesson       OptionsCPod OptionsGetLesson
+  | CommandDownloadIndex   OptionsCPod
+  | CommandDownloadContent OptionsCPod
+  | CommandExportVocab
   deriving (Show)
 
 data OptionsSearch = OptionsSearch {
@@ -114,25 +120,31 @@ getOptions = execParser opts
 
 parseOptions :: Parser Options
 parseOptions = Options
-    <$> parseReqLogin
-    <*> parseBaseUrl
-    <*> (subparser $ mconcat [
+    <$> (subparser $ mconcat [
             command "search" $
-              info (helper <*> (CommandSearch <$> parseOptionsSearch))
+              info (helper <*> (CommandSearch <$> parseOptionsCPod <*> parseOptionsSearch))
                    (progDesc "Search for lessons")
           , command "latest" $
-              info (helper <*> (CommandLatest <$> parseOptionsLatest))
+              info (helper <*> (CommandLatest <$> parseOptionsCPod <*> parseOptionsLatest))
                    (progDesc "Get the list of the latest lessons")
           , command "get-lesson" $
-              info (helper <*> (CommandGetLesson <$> parseOptionsGetLesson))
+              info (helper <*> (CommandGetLesson <$> parseOptionsCPod <*> parseOptionsGetLesson))
                    (progDesc "Return the contents of a particular lesson")
           , command "download-index" $
-              info (helper <*> (pure CommandDownloadIndex))
+              info (helper <*> (CommandDownloadIndex <$> parseOptionsCPod))
                    (progDesc "Download the full lesson index")
           , command "download-content" $
-              info (helper <*> (pure CommandDownloadContent))
+              info (helper <*> (CommandDownloadContent <$> parseOptionsCPod))
                    (progDesc "Download lesson content (download index first)")
+          , command "export-vocab" $
+              info (helper <*> (pure CommandExportVocab))
+                   (progDesc "Export vocabulary (download content first)")
           ])
+
+parseOptionsCPod :: Parser OptionsCPod
+parseOptionsCPod = OptionsCPod
+    <$> parseReqLogin
+    <*> parseBaseUrl
 
 parseOptionsSearch :: Parser OptionsSearch
 parseOptionsSearch = OptionsSearch

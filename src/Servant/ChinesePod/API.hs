@@ -38,7 +38,7 @@ module Servant.ChinesePod.API (
   , Sentence(..)
   , UserId(..)
   , V3Id(..)
-  , Vocabulary
+  , Vocabulary(..)
   , Word(..)
     -- * Auxiliary
     -- ** Types

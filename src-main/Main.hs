@@ -4,27 +4,13 @@ import Data.Binary
 import System.Directory
 import Text.Show.Pretty
 import Text.Printf (printf)
-import Servant.ChinesePod.API
-import Servant.ChinesePod.Client
 import qualified Data.Map as Map
 
-import Options
+import Servant.ChinesePod.API
+import Servant.ChinesePod.Client
+import qualified Servant.ChinesePod.Vocab as Vocab
 
-exec :: ChinesePodAPI -> RespLogin -> Command -> EitherT ServantError IO ()
-exec cpodAPI@ChinesePodAPI{..} respLogin = go
-  where
-    go :: Command -> EitherT ServantError IO ()
-    go (CommandSearch opts) = do
-      respSearchLessons <- cpodSearchLessons $ fromLogin respLogin opts
-      liftIO $ putStrLn $ dumpStr respSearchLessons
-    go (CommandLatest opts) = do
-      respGetLatestLessons <- cpodGetLatestLessons $ fromLogin respLogin opts
-      liftIO $ putStrLn $ dumpStr respGetLatestLessons
-    go (CommandGetLesson opts) = do
-      respGetLesson <- cpodGetLesson $ fromLogin respLogin opts
-      liftIO $ putStrLn $ dumpStr respGetLesson
-    go CommandDownloadIndex   = downloadIndex   cpodAPI respLogin
-    go CommandDownloadContent = downloadContent cpodAPI respLogin
+import Options
 
 -- | Download the full lesson index
 downloadIndex :: ChinesePodAPI -> RespLogin -> EitherT ServantError IO ()
@@ -98,18 +84,56 @@ downloadContent ChinesePodAPI{..} RespLogin{..} = do
       where
         lessonFile = "./content/" ++ lessonId
 
-client :: ChinesePodAPI -> ReqLogin -> Command -> EitherT ServantError IO ()
-client cpodAPI@ChinesePodAPI{..} reqLogin cmd = do
-    respLogin <- cpodLogin reqLogin
-    exec cpodAPI respLogin cmd
-    OK <- cpodLogout $ fromLogin respLogin ()
-    return ()
+-- | Export all vocabulary to a single file
+exportVocab :: IO ()
+exportVocab = do
+    lessonFiles <- filter (not . hidden) <$> getDirectoryContents "./content"
+    lessons     <- mapM decodeFile $ map ("./content/" ++) lessonFiles
+    encodeFile "./vocab" $ Vocab.extractVocab lessons
+  where
+    hidden :: FilePath -> Bool
+    hidden ('.':_) = True
+    hidden _       = False
+
+exec :: Command -> IO ()
+exec (CommandSearch optsCPod optsCmd) =
+    withCPod optsCPod $ \ChinesePodAPI{..} respLogin -> do
+      respSearchLessons <- cpodSearchLessons $ fromLogin respLogin optsCmd
+      liftIO $ putStrLn $ dumpStr respSearchLessons
+exec (CommandLatest optsCPod optsCmd) =
+    withCPod optsCPod $ \ChinesePodAPI{..} respLogin -> do
+      respGetLatestLessons <- cpodGetLatestLessons $ fromLogin respLogin optsCmd
+      liftIO $ putStrLn $ dumpStr respGetLatestLessons
+exec (CommandGetLesson optsCPod optsCmd) =
+    withCPod optsCPod $ \ChinesePodAPI{..} respLogin -> do
+      respGetLesson <- cpodGetLesson $ fromLogin respLogin optsCmd
+      liftIO $ putStrLn $ dumpStr respGetLesson
+exec (CommandDownloadIndex optsCPod) =
+    withCPod optsCPod $ downloadIndex
+exec (CommandDownloadContent optsCPod) =
+    withCPod optsCPod $ downloadContent
+exec CommandExportVocab =
+    exportVocab
+
+withCPod :: OptionsCPod
+         -> (ChinesePodAPI -> RespLogin -> EitherT ServantError IO ())
+         -> IO ()
+withCPod OptionsCPod{..} handler = do
+    mRes <- runEitherT runHandler
+    case mRes of
+      Left  err -> print err
+      Right ()  -> return ()
+  where
+    runHandler :: EitherT ServantError IO ()
+    runHandler = do
+        respLogin <- cpodLogin optionsReqLogin
+        handler cpodAPI respLogin
+        OK <- cpodLogout $ fromLogin respLogin ()
+        return ()
+
+    cpodAPI@ChinesePodAPI{..} = chinesePodAPI optionsBaseUrl
 
 main :: IO ()
 main = do
     Options{..} <- getOptions
-    let cpodAPI = chinesePodAPI optionsBaseUrl
-    mRes <- runEitherT $ client cpodAPI optionsReqLogin optionsCommand
-    case mRes of
-      Left  err -> print err
-      Right ()  -> return ()
+    exec optionsCommand
