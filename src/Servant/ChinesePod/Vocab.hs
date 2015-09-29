@@ -20,27 +20,27 @@ import Servant.ChinesePod.API (V3Id(..))
 import qualified Servant.ChinesePod.API as API
 
 data Lesson = Lesson {
-      lessonTitle    :: String
-    , lessonLevel    :: Level
-    , lessonHosts    :: String
-    , lessonKeyVocab :: [Word]
-    , lessonSupVocab :: [Word]
+      title :: String
+    , level :: Level
+    , hosts :: String
+    , key   :: [Word]
+    , sup   :: [Word]
     }
   deriving (Generic)
 
 data Level =
-    LevelNewbie
-  | LevelElementary
-  | LevelIntermediate
-  | LevelUpperIntermediate
-  | LevelAdvanced
-  | LevelMedia
+    Newbie
+  | Elementary
+  | Intermediate
+  | UpperIntermediate
+  | Advanced
+  | Media
   deriving (Generic)
 
 data Word = Word {
-      wordPinyin :: String
-    , wordSource :: String
-    , wordTarget :: String
+      pinyin :: String
+    , source :: String
+    , target :: String
     }
   deriving (Generic)
 
@@ -54,23 +54,16 @@ instance Binary Level
 instance Binary Vocab
 instance Binary Word
 
-instance PrettyVal Level where
-  prettyVal LevelNewbie            = P.Con "Newbie"            []
-  prettyVal LevelElementary        = P.Con "Elementary"        []
-  prettyVal LevelIntermediate      = P.Con "Intermediate"      []
-  prettyVal LevelUpperIntermediate = P.Con "UpperIntermediate" []
-  prettyVal LevelAdvanced          = P.Con "Advanced"          []
-  prettyVal LevelMedia             = P.Con "Media"             []
-
 instance PrettyVal Word where
   prettyVal Word{..} = P.Con "Word" [
-      prettyVal wordPinyin
-    , prettyVal wordSource
-    , prettyVal wordTarget
+      prettyVal pinyin
+    , prettyVal source
+    , prettyVal target
     ]
 
 instance PrettyVal Lesson
 instance PrettyVal Vocab
+instance PrettyVal Level
 
 instance Show Lesson where show = dumpStr
 instance Show Level  where show = dumpStr
@@ -93,29 +86,29 @@ extractVocab = Vocab . Map.fromList . catMaybes . map go
 extractLesson :: API.LessonContent -> Maybe Lesson
 extractLesson API.LessonContent{..} = do
     guard $ lessonContentVideoLesson /= Just True
-    let lessonTitle = lessonContentTitle
-        lessonHosts = lessonContentHosts
-    lessonLevel    <- extractLevel lessonContentLevel
-    vocabulary     <- lessonContentVocabulary
-    let lessonKeyVocab = map extractWord $ API.vocabularyKeyVocab vocabulary
-    let lessonSupVocab = map extractWord $ API.vocabularySupVocab vocabulary
+    let title = lessonContentTitle
+        hosts = lessonContentHosts
+    level      <- extractLevel lessonContentLevel
+    vocabulary <- lessonContentVocabulary
+    let key = map extractWord $ API.vocabularyKeyVocab vocabulary
+    let sup = map extractWord $ API.vocabularySupVocab vocabulary
     return Lesson{..}
 
 extractLevel :: Maybe API.Level -> Maybe Level
 extractLevel Nothing                           = Nothing
-extractLevel (Just API.LevelNewbie)            = Just LevelNewbie
-extractLevel (Just API.LevelElementary)        = Just LevelElementary
-extractLevel (Just API.LevelIntermediate)      = Just LevelIntermediate
-extractLevel (Just API.LevelUpperIntermediate) = Just LevelUpperIntermediate
-extractLevel (Just API.LevelAdvanced)          = Just LevelAdvanced
-extractLevel (Just API.LevelMedia)             = Just LevelMedia
+extractLevel (Just API.LevelNewbie)            = Just Newbie
+extractLevel (Just API.LevelElementary)        = Just Elementary
+extractLevel (Just API.LevelIntermediate)      = Just Intermediate
+extractLevel (Just API.LevelUpperIntermediate) = Just UpperIntermediate
+extractLevel (Just API.LevelAdvanced)          = Just Advanced
+extractLevel (Just API.LevelMedia)             = Just Media
 extractLevel (Just (API.LevelOther _))         = Nothing
 
 extractWord :: API.Word -> Word
 extractWord API.Word{..} = Word {
-      wordPinyin = wordPinyin
-    , wordSource = wordSource
-    , wordTarget = wordTarget
+      pinyin = wordPinyin
+    , source = wordSource
+    , target = wordTarget
     }
 
 {-------------------------------------------------------------------------------
