@@ -56,6 +56,7 @@ import Control.Monad
 import Crypto.Hash
 import Data.Aeson.Types hiding ((.:?))
 import Data.Binary (Binary)
+import Data.Data (Data)
 import Data.List (sortBy)
 import Data.Map (Map)
 import Data.Maybe (catMaybes)
@@ -112,25 +113,25 @@ data ReqLogin = ReqLogin {
     , reqLoginEmail     :: String
     , reqLoginSignature :: ReqSignature
     }
-  deriving (Show, Generic)
+  deriving (Show, Generic, Data)
 
 data ReqSignature = ReqSignature {
       reqSignatureClientSecret :: String
     , reqSignatureUserPassword :: String
     }
-  deriving (Show, Generic)
+  deriving (Show, Generic, Data)
 
 data ReqLogout = ReqLogout {
       reqLogoutAccessToken :: AccessToken
     , reqLogoutUserId      :: UserId
     }
-  deriving (Show, Generic)
+  deriving (Show, Generic, Data)
 
 data ReqGetUserInfo = ReqGetUserInfo {
       reqGetUserInfoAccessToken :: AccessToken
     , reqGetUserInfoUserId      :: UserId
     }
-  deriving (Show, Generic)
+  deriving (Show, Generic, Data)
 
 data ReqGetLesson = ReqGetLesson {
       reqGetLessonAccessToken :: AccessToken
@@ -138,7 +139,7 @@ data ReqGetLesson = ReqGetLesson {
     , reqGetLessonV3Id        :: V3Id
     , reqGetLessonType        :: Maybe LessonContentType
     }
-  deriving (Show, Generic)
+  deriving (Show, Generic, Data)
 
 data ReqSearchLessons = ReqSearchLessons {
       reqSearchLessonsAccessToken :: AccessToken
@@ -148,7 +149,7 @@ data ReqSearchLessons = ReqSearchLessons {
     , reqSearchLessonsNumResults  :: Maybe Int
     , reqSearchLessonsPage        :: Maybe Int
     }
-  deriving (Show, Generic)
+  deriving (Show, Generic, Data)
 
 data ReqGetLatestLessons = ReqGetLatestLessons {
       reqGetLatestLessonsAccessToken :: AccessToken
@@ -158,7 +159,7 @@ data ReqGetLatestLessons = ReqGetLatestLessons {
     , reqGetLatestLessonsLang        :: Maybe String
     , reqGetLatestLessonsLevelId     :: Maybe Level
     }
-  deriving (Show, Generic)
+  deriving (Show, Generic, Data)
 
 {-------------------------------------------------------------------------------
   Responses
@@ -183,7 +184,7 @@ data RespLogin = RespLogin {
     , respLoginSubscribedLessons      :: Int
     , respLoginStudiedLessons         :: Int
     }
-  deriving (Show, Generic)
+  deriving (Show, Generic, Data)
 
 data RespGetUserInfo = RespGetUserInfo {
       respGetUserInfoName                     :: String
@@ -199,24 +200,24 @@ data RespGetUserInfo = RespGetUserInfo {
     , respGetUserInfoLevel                    :: Maybe Level
     , respGetUserInfoType                     :: Undocumented String
     }
-  deriving (Show, Generic)
+  deriving (Show, Generic, Data)
 
 {-------------------------------------------------------------------------------
   ChinesePod specific datatypes
 -------------------------------------------------------------------------------}
 
 newtype UserId = UserId String
-  deriving (Show, Generic, Eq, Ord, FromJSON, ToText, FromText)
+  deriving (Show, Generic, Data, Eq, Ord, FromJSON, ToText, FromText)
 
 newtype AccessToken = AccessToken String
-  deriving (Show, Generic, Eq, Ord, FromJSON, ToText, FromText)
+  deriving (Show, Generic, Data, Eq, Ord, FromJSON, ToText, FromText)
 
 newtype V3Id = V3Id String
-  deriving (Show, Generic, Eq, Ord, FromJSON, ToText, FromText)
+  deriving (Show, Generic, Data, Eq, Ord, FromJSON, ToText, FromText)
 
 -- | Some ChinesePod requests simply return OK
 data OK = OK
-  deriving (Show, Generic)
+  deriving (Show, Generic, Data)
 
 -- | User level
 data Level =
@@ -227,7 +228,7 @@ data Level =
   | LevelAdvanced
   | LevelMedia
   | LevelOther String
-  deriving (Show, Generic)
+  deriving (Show, Generic, Data)
 
 data Lesson = Lesson {
       lessonV3Id                 :: V3Id
@@ -247,7 +248,7 @@ data Lesson = Lesson {
     , lessonDialogueMp3          :: Maybe String
     , lessonReviewMp3            :: Maybe String
     }
-  deriving (Show, Generic)
+  deriving (Show, Generic, Data)
 
 data LessonContentType =
     LessonContentAll
@@ -255,7 +256,7 @@ data LessonContentType =
   | LessonContentVocabulary
   | LessonContentDialogue
   | LessonContentGrammar
-  deriving (Show, Generic)
+  deriving (Show, Generic, Data)
 
 data LessonContent = LessonContent {
       lessonContentContentId            :: String
@@ -357,7 +358,7 @@ data LessonContent = LessonContent {
     , lessonContentExpansion            :: Maybe Expansion
     , lessonContentVocabulary           :: Maybe Vocabulary
     }
-  deriving (Show, Generic)
+  deriving (Show, Generic, Data)
 
 data Sentence = Sentence {
       sentenceV3Id          :: V3Id
@@ -374,7 +375,7 @@ data Sentence = Sentence {
     , sentenceVocabulary    :: String
     , sentenceSentenceWords :: [Word]
     }
-  deriving (Show, Generic)
+  deriving (Show, Generic, Data)
 
 data Word = Word {
       wordV3Id            :: Maybe V3Id
@@ -389,7 +390,7 @@ data Word = Word {
     , wordDisplayOrder    :: Maybe Int
     , wordVocabularyClass :: Maybe String
     }
-  deriving (Show, Generic)
+  deriving (Show, Generic, Data)
 
 data GrammarPoint = GrammarPoint {
       grammarPointCreateTime     :: String
@@ -410,7 +411,7 @@ data GrammarPoint = GrammarPoint {
     , grammarPointTree           :: String
     , grammarPointUpdateTime     :: String
     }
-  deriving (Show, Generic)
+  deriving (Show, Generic, Data)
 
 data GrammarSentence = GrammarSentence {
       grammarSentenceAudio             :: String
@@ -435,7 +436,7 @@ data GrammarSentence = GrammarSentence {
     , grammarSentenceUpdateTime        :: Maybe String
     , grammarSentenceWords             :: [Word]
     }
-  deriving (Show, Generic)
+  deriving (Show, Generic, Data)
 
 data Example = Example {
       exampleAudio         :: String
@@ -446,18 +447,18 @@ data Example = Example {
     , exampleSourceT       :: Maybe String
     , exampleTarget        :: String
     }
-  deriving (Show, Generic)
+  deriving (Show, Generic, Data)
 
 data Vocabulary = Vocabulary {
       vocabularyKeyVocab :: [Word]
     , vocabularySupVocab :: [Word]
     }
-  deriving (Show, Generic)
+  deriving (Show, Generic, Data)
 
 data Expansion = Expansion {
     expansion :: Map String [Example]
   }
-  deriving (Show, Generic)
+  deriving (Show, Generic, Data)
 
 {-------------------------------------------------------------------------------
   Encoding requests
@@ -943,7 +944,7 @@ data SearchResults a = SearchResults {
       searchResults      :: Map Int a
     , searchResultsTotal :: Int
     }
-  deriving (Show, Generic)
+  deriving (Show, Generic, Data)
 
 instance FromJSON a => FromJSON (SearchResults a) where
     parseJSON = withObject "SearchResults" $ \obj -> do

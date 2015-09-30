@@ -9,12 +9,20 @@ maintainer:          edsko@edsko.net
 -- copyright:
 category:            Web
 build-type:          Simple
--- extra-source-files:
+extra-source-files:  HSK/2012/HSK1.txt
+                     HSK/2012/HSK2.txt
+                     HSK/2012/HSK3.txt
+                     HSK/2012/HSK4.txt
+                     HSK/2012/HSK5.txt
+                     HSK/2012/HSK6.txt
 cabal-version:       >=1.10
 
 library
   exposed-modules:     Servant.ChinesePod.API
+                       Servant.ChinesePod.Analysis
                        Servant.ChinesePod.Client
+                       Servant.ChinesePod.HSK.Aux
+                       Servant.ChinesePod.HSK.HSK2012
                        Servant.ChinesePod.Vocab
   other-modules:       Servant.ChinesePod.Util.Orphans.PrettyVal
   build-depends:         base >=4.8 && <4.9
@@ -29,6 +37,7 @@ library
                        , pretty-show
                        , servant
                        , servant-client
+                       , template-haskell
                        , text
                        , transformers
                        , unordered-containers
@@ -37,6 +46,7 @@ library
   hs-source-dirs:      src
   default-language:    Haskell2010
   default-extensions:  DataKinds
+                       DeriveDataTypeable
                        DeriveGeneric
                        FlexibleInstances
                        GeneralizedNewtypeDeriving
@@ -46,6 +56,7 @@ library
                        ScopedTypeVariables
                        TypeOperators
   other-extensions:    OverloadedStrings
+                       TemplateHaskell
   ghc-options:         -Wall
 
 executable cpod-query

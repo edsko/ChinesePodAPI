@@ -4,11 +4,14 @@ module Servant.ChinesePod.Vocab (
   , Word(..)
   , extractVocab
   , loadVocab
+    -- * Re-exports
+  , V3Id(..)
   ) where
 
 import Prelude hiding (Word)
 import Control.Monad
 import Data.Binary (Binary, decodeFile)
+import Data.Data (Data)
 import Data.Map (Map)
 import Data.Maybe (catMaybes)
 import GHC.Generics
@@ -26,7 +29,7 @@ data Lesson = Lesson {
     , key   :: [Word]
     , sup   :: [Word]
     }
-  deriving (Generic)
+  deriving (Generic, Data)
 
 data Level =
     Newbie
@@ -35,19 +38,19 @@ data Level =
   | UpperIntermediate
   | Advanced
   | Media
-  deriving (Generic)
+  deriving (Generic, Data)
 
 data Word = Word {
       pinyin :: String
     , source :: String
     , target :: String
     }
-  deriving (Generic)
+  deriving (Generic, Data)
 
 data Vocab = Vocab {
       vocab :: Map V3Id Lesson
     }
-  deriving (Generic)
+  deriving (Generic, Data)
 
 instance Binary Lesson
 instance Binary Level
