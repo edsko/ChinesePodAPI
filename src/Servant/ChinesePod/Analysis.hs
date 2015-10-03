@@ -37,7 +37,8 @@ import Servant.ChinesePod.HSK.HSK2012
 -- | Word in simplified characters
 type Simpl = String
 
-data AnalysisState = AnalysisState {
+-- | The static part of the analysis (that doesn't change over time)
+data AnalysisStatic = AnalysisStatic {
       -- | All lessons available
       analysisAllLessons :: Map V3Id Lesson
 
@@ -51,16 +52,28 @@ data AnalysisState = AnalysisState {
       -- supplemental vocabulary.
     , analysisInverse :: Map Simpl ([V3Id], [V3Id])
 
-      -- | Words we have left to chose lessons for
-    , analysisTodo :: Set Simpl
-
-      -- | Relevant lessons that are stil available to chose
-    , analysisAvailable :: [RelevantLesson]
-
-      -- | Lessons we already chosen
-    , analysisPicked :: [RelevantLesson]
+      -- | The "relevant" lessons to this set of words
+    , analysisRelevant :: Map V3Id RelevantLesson
     }
   deriving (Generic)
+
+-- | The dynamic part of the analysis: words we've covered, lesosns we picked
+data AnalysisDynamic = AnalysisDynamic {
+      -- | Words we have left to chose lessons for
+      analysisTodo :: [Word]
+
+      -- | Lessons we already chosen
+    , analysisPicked :: [V3Id]
+
+      -- | Lessons still available
+      --
+      -- There may be lessons not in 'analysisAvailable' and not in
+      -- 'analysisPicked', if we remove them for other reasons.
+    , analysisAvailable :: [V3Id]
+    }
+  deriving (Generic)
+
+type AnalysisState = (AnalysisStatic, AnalysisDynamic)
 
 -- | Lesson relevant to the set of words we are studying
 --
@@ -68,11 +81,8 @@ data AnalysisState = AnalysisState {
 --
 -- > not (null (relKey ++ relSup))
 data RelevantLesson = RelevantLesson {
-      -- | Lesson ID
-      relId :: V3Id
-
       -- | Relevant key vocabulary
-    , relKey :: [Simpl]
+      relKey :: [Simpl]
 
       -- | Relevant supplemental vocabulary
     , relSup :: [Simpl]
@@ -85,11 +95,13 @@ data RelevantLesson = RelevantLesson {
     }
   deriving (Generic)
 
-instance PrettyVal AnalysisState
+instance PrettyVal AnalysisStatic
+instance PrettyVal AnalysisDynamic
 instance PrettyVal RelevantLesson
 
-instance Show AnalysisState  where show = dumpStr
-instance Show RelevantLesson where show = dumpStr
+instance Show AnalysisStatic  where show = dumpStr
+instance Show AnalysisDynamic where show = dumpStr
+instance Show RelevantLesson  where show = dumpStr
 
 globalAnalysisState :: IORef AnalysisState
 {-# NOINLINE globalAnalysisState #-}
@@ -100,32 +112,47 @@ globalAnalysisState = unsafePerformIO $ newIORef undefined
 -------------------------------------------------------------------------------}
 
 initState :: FilePath -> [Word] -> IO ()
-initState vocabFile todo = do
-    Vocab vocab <- loadVocab vocabFile
+initState vocabFile words = do
+    vocab <- loadVocab vocabFile
+    let static  = analysisStatic vocab words
+        dynamic = analysisDynamic static
+    writeIORef globalAnalysisState (static, dynamic)
 
-    let analysisAllLessons = vocab
-        analysisAllWords   = todo
-        analysisInverse    = computeInverse vocab analysisTodo
-        analysisTodo       = Set.fromList (map source todo)
-        analysisAvailable  = findRelevant analysisTodo vocab
-        analysisPicked     = []
-
-    writeIORef globalAnalysisState AnalysisState {..}
+analysisStatic :: Vocab -> [Word] -> AnalysisStatic
+analysisStatic (Vocab vocab) words = AnalysisStatic {
+      analysisAllLessons = vocab
+    , analysisAllWords   = words
+    , analysisInverse    = computeInverse vocab words'
+    , analysisRelevant   = findRelevant vocab
+    }
   where
-    findRelevant :: Set Simpl -> Map V3Id Lesson -> [RelevantLesson]
-    findRelevant words = catMaybes
-                       . map (uncurry (relevantLesson words))
-                       . Map.toList
+    findRelevant :: Map V3Id Lesson -> Map V3Id RelevantLesson
+    findRelevant = Map.fromList
+                 . catMaybes
+                 . map (relevantLesson (Set.fromList words'))
+                 . Map.toList
+
+    words' :: [Simpl]
+    words' = map source words
+
+-- | Initial dynamic analysis state
+analysisDynamic :: AnalysisStatic -> AnalysisDynamic
+analysisDynamic AnalysisStatic{..} = AnalysisDynamic{
+      analysisTodo      = analysisAllWords
+    , analysisPicked    = []
+    , analysisAvailable = Map.keys analysisRelevant
+    }
 
 -- | Check if a lesson is relevant to the set of words we are studying
 --
 -- If relevant, return initial statistics for the lesosn.
-relevantLesson :: Set String -> V3Id -> Lesson -> Maybe RelevantLesson
-relevantLesson words lessonId Lesson{..} = do
+relevantLesson :: Set String
+               -> (V3Id, Lesson)
+               -> Maybe (V3Id, RelevantLesson)
+relevantLesson words (lessonId, Lesson{..}) = do
     guard $ not (null (relKey ++ relSup))
-    return RelevantLesson{..}
+    return (lessonId, RelevantLesson{..})
   where
-    relId    = lessonId
     relKey   = catMaybes (map relevantWord key)
     relSup   = catMaybes (map relevantWord sup)
     irrelKey = length key - length relKey
@@ -137,10 +164,9 @@ relevantLesson words lessonId Lesson{..} = do
       return source
 
 computeInverse :: Map V3Id Lesson
-               -> Set Simpl
+               -> [Simpl]
                -> Map Simpl ([V3Id], [V3Id])
-computeInverse vocab =
-    Map.fromList . map go . Set.toList
+computeInverse vocab = Map.fromList . map go
   where
     vocab' :: [(V3Id, Lesson)]
     vocab' = Map.toList vocab
@@ -214,36 +240,39 @@ summarizeUsing :: (Ord a, Ord b) =>
                -> (WordSummary   -> b) -- Sort key forwords
                -> IO ()
 summarizeUsing lessonKey wordKey = do
-    AnalysisState{..} <- readIORef globalAnalysisState
+    (AnalysisStatic{..}, AnalysisDynamic{..}) <- readIORef globalAnalysisState
 
-    let summarizeLesson :: RelevantLesson -> LessonSummary
-        summarizeLesson RelevantLesson{..} = LessonSummary {
-              lessonSummaryId       = relId
-            , lessonSummaryTitle    = title $ analysisAllLessons Map.! relId
+    let summarizeLesson :: V3Id -> LessonSummary
+        summarizeLesson lessonId = LessonSummary {
+              lessonSummaryId       = lessonId
+            , lessonSummaryTitle    = title
             , lessonSummaryRelKey   = relKey
             , lessonSummaryRelSup   = relSup
-            , lessonSummaryLevel    = level $ analysisAllLessons Map.! relId
+            , lessonSummaryLevel    = level
             , lessonSummaryIrrelKey = irrelKey
             , lessonSummaryIrrelSup = irrelSup
             }
+          where
+            RelevantLesson{..} = analysisRelevant   Map.! lessonId
+            Lesson{..}         = analysisAllLessons Map.! lessonId
 
-    let summarizeWord :: Simpl -> WordSummary
-        summarizeWord word = WordSummary {
-              wordSummarySimpl = word
+    let summarizeWord :: Word -> WordSummary
+        summarizeWord Word{..} = WordSummary {
+              wordSummarySimpl = source
             , wordSummaryInKey = inKey
             , wordSummaryInSup = inSup
             }
           where
             inKey, inSup :: [V3Id]
-            (inKey, inSup) = analysisInverse Map.! word
+            (inKey, inSup) = analysisInverse Map.! source
 
-    putStrLn $ "Words left (" ++ show (Set.size analysisTodo) ++ ")"
+    putStrLn $ "Words left (" ++ show (length analysisTodo) ++ ")"
     putStrLn $ "---------------------------------------------------------------"
     putStrLn $ intercalate "\n"
              $ map show
              $ sortBy (comparing wordKey)
              $ map summarizeWord
-             $ Set.toList analysisTodo
+             $ analysisTodo
     putStrLn $ ""
 
     putStrLn $ "Available lessons (" ++ show (length analysisAvailable) ++ ")"
