@@ -206,13 +206,13 @@ data RespGetUserInfo = RespGetUserInfo {
   ChinesePod specific datatypes
 -------------------------------------------------------------------------------}
 
-newtype UserId = UserId String
+newtype UserId = UserId { userIdString :: String }
   deriving (Show, Generic, Data, Eq, Ord, FromJSON, ToText, FromText)
 
-newtype AccessToken = AccessToken String
+newtype AccessToken = AccessToken { accessTokenString :: String }
   deriving (Show, Generic, Data, Eq, Ord, FromJSON, ToText, FromText)
 
-newtype V3Id = V3Id String
+newtype V3Id = V3Id { v3IdString :: String }
   deriving (Show, Generic, Data, Eq, Ord, FromJSON, ToText, FromText)
 
 -- | Some ChinesePod requests simply return OK
