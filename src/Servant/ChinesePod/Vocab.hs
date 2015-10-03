@@ -2,6 +2,7 @@ module Servant.ChinesePod.Vocab (
     Vocab(..)
   , Lesson(..)
   , Word(..)
+  , Level(..)
   , extractVocab
   , loadVocab
     -- * Re-exports

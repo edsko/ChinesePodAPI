@@ -16,9 +16,10 @@ module Servant.ChinesePod.Analysis (
 import Prelude hiding (Word, words)
 import Control.Monad
 import Data.IORef
-import Data.List (intercalate)
+import Data.List (intercalate, sortBy)
 import Data.Map (Map)
 import Data.Maybe (catMaybes)
+import Data.Ord (comparing)
 import Data.Set (Set)
 import GHC.Generics (Generic)
 import System.IO.Unsafe (unsafePerformIO)
@@ -42,6 +43,13 @@ data AnalysisState = AnalysisState {
 
       -- | All words we're studying
     , analysisAllWords :: [Word]
+
+      -- | "Inverse" index: which lessons cover a certain word?
+      --
+      -- For each word we record which lessons contain that word in their
+      -- key vocabulary and which lessons contain that word in their
+      -- supplemental vocabulary.
+    , analysisInverse :: Map Simpl ([V3Id], [V3Id])
 
       -- | Words we have left to chose lessons for
     , analysisTodo :: Set Simpl
@@ -97,6 +105,7 @@ initState vocabFile todo = do
 
     let analysisAllLessons = vocab
         analysisAllWords   = todo
+        analysisInverse    = computeInverse vocab analysisTodo
         analysisTodo       = Set.fromList (map source todo)
         analysisAvailable  = findRelevant analysisTodo vocab
         analysisPicked     = []
@@ -127,71 +136,137 @@ relevantLesson words lessonId Lesson{..} = do
       guard $ source `Set.member` words
       return source
 
+computeInverse :: Map V3Id Lesson
+               -> Set Simpl
+               -> Map Simpl ([V3Id], [V3Id])
+computeInverse vocab =
+    Map.fromList . map go . Set.toList
+  where
+    vocab' :: [(V3Id, Lesson)]
+    vocab' = Map.toList vocab
+
+    go :: Simpl -> (Simpl, ([V3Id], [V3Id]))
+    go word = ( word
+              , ( catMaybes $ map (containsIn key word) vocab'
+                , catMaybes $ map (containsIn sup word) vocab'
+                )
+              )
+
+    containsIn :: (Lesson -> [Word]) -> Simpl -> (V3Id, Lesson) -> Maybe V3Id
+    containsIn f simpl (v3id, lesson) = do
+      guard $ simpl `elem` map source (f lesson)
+      return v3id
+
 {-------------------------------------------------------------------------------
   Query the state
 -------------------------------------------------------------------------------}
 
+data LessonSummary = LessonSummary {
+      lessonSummaryId       :: V3Id
+    , lessonSummaryTitle    :: String
+    , lessonSummaryRelKey   :: [Simpl]
+    , lessonSummaryRelSup   :: [Simpl]
+    , lessonSummaryLevel    :: Level
+    , lessonSummaryIrrelKey :: Int
+    , lessonSummaryIrrelSup :: Int
+    }
+
+data WordSummary = WordSummary {
+      wordSummarySimpl :: Simpl
+    , wordSummaryInKey :: [V3Id]
+    , wordSummaryInSup :: [V3Id]
+    }
+
+instance Show LessonSummary where
+  show LessonSummary{..} = concat [
+        v3IdString lessonSummaryId
+      , " ("
+      , lessonSummaryTitle
+      , "): "
+      , intercalate "," lessonSummaryRelKey
+      , "/"
+      , intercalate "," lessonSummaryRelSup
+      , " ("
+      , show $ lessonSummaryLevel
+      , ","
+      , show $ length lessonSummaryRelKey
+      , "/"
+      , show $ length lessonSummaryRelSup
+      , ","
+      , show lessonSummaryIrrelKey
+      , "/"
+      , show lessonSummaryIrrelSup
+      , ")"
+      ]
+
+instance Show WordSummary where
+  show WordSummary{..} =  concat [
+        wordSummarySimpl
+      , ": "
+      , show $ length wordSummaryInKey
+      , "/"
+      , show $ length wordSummaryInSup
+      ]
+
 -- | Show a readable summary of what's left to do
-summarize :: IO ()
-summarize = do
+summarizeUsing :: (Ord a, Ord b) =>
+                  (LessonSummary -> a) -- Sort key for lessons
+               -> (WordSummary   -> b) -- Sort key forwords
+               -> IO ()
+summarizeUsing lessonKey wordKey = do
     AnalysisState{..} <- readIORef globalAnalysisState
 
-    let summarizeLesson :: RelevantLesson -> String
-        summarizeLesson RelevantLesson{..} = concat [
-            v3IdString relId
-          , " ("
-          , title (analysisAllLessons Map.! relId)
-          , "): "
-          , intercalate "," relKey
-          , ";"
-          , intercalate "," relSup
-          , " ("
-          , show (level (analysisAllLessons Map.! relId))
-          , ","
-          , show (length relKey)
-          , ";"
-          , show (length relSup)
-          , ","
-          , show irrelKey
-          , ";"
-          , show irrelSup
-          , ")"
-          ]
+    let summarizeLesson :: RelevantLesson -> LessonSummary
+        summarizeLesson RelevantLesson{..} = LessonSummary {
+              lessonSummaryId       = relId
+            , lessonSummaryTitle    = title $ analysisAllLessons Map.! relId
+            , lessonSummaryRelKey   = relKey
+            , lessonSummaryRelSup   = relSup
+            , lessonSummaryLevel    = level $ analysisAllLessons Map.! relId
+            , lessonSummaryIrrelKey = irrelKey
+            , lessonSummaryIrrelSup = irrelSup
+            }
+
+    let summarizeWord :: Simpl -> WordSummary
+        summarizeWord word = WordSummary {
+              wordSummarySimpl = word
+            , wordSummaryInKey = inKey
+            , wordSummaryInSup = inSup
+            }
+          where
+            inKey, inSup :: [V3Id]
+            (inKey, inSup) = analysisInverse Map.! word
 
     putStrLn $ "Words left (" ++ show (Set.size analysisTodo) ++ ")"
     putStrLn $ "---------------------------------------------------------------"
-    putStrLn $ intercalate "," $ Set.toList analysisTodo
+    putStrLn $ intercalate "\n"
+             $ map show
+             $ sortBy (comparing wordKey)
+             $ map summarizeWord
+             $ Set.toList analysisTodo
     putStrLn $ ""
 
     putStrLn $ "Available lessons (" ++ show (length analysisAvailable) ++ ")"
     putStrLn $ "---------------------------------------------------------------"
-    putStrLn $ intercalate "\n" $ map summarizeLesson analysisAvailable
+    putStrLn $ intercalate "\n"
+             $ map show
+             $ sortBy (comparing lessonKey)
+             $ map summarizeLesson
+             $ analysisAvailable
     putStrLn $ ""
 
-
-
 {-------------------------------------------------------------------------------
-  Analysis statistics
+  Different kinds of sorting functions
 -------------------------------------------------------------------------------}
 
-{-
-data Stats = Stats {
-      statsAvailable :: Int
-    , statsPicked    :: Int
-    , statsTodo      :: Int
-    }
-  deriving (Generic)
+-- | Number of relevant words in the key vocabulary of the lesson
+lessonNumKey :: LessonSummary -> Int
+lessonNumKey LessonSummary{..} = length lessonSummaryRelKey
 
-instance PrettyVal Stats
-instance Show Stats where show = dumpStr
+-- | Number of lessons that have this word in their key vocabulary
+wordNumKey :: WordSummary -> Int
+wordNumKey WordSummary{..} = length wordSummaryInKey
 
-stats :: AnalysisState -> Stats
-stats AnalysisState{..} = Stats {
-      statsAvailable = Map.size analysisAvailable
-    , statsPicked    = length analysisPicked
-    , statsTodo      = length analysisTodo
-    }
-
-getStats :: IO Stats
-getStats = stats <$> readIORef globalAnalysisState
--}
+-- | Summarize using default sorting
+summarize :: IO ()
+summarize = summarizeUsing lessonNumKey wordNumKey
