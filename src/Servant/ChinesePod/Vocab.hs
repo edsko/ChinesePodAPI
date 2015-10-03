@@ -39,7 +39,7 @@ data Level =
   | UpperIntermediate
   | Advanced
   | Media
-  deriving (Generic, Data)
+  deriving (Generic, Data, Eq, Ord)
 
 data Word = Word {
       pinyin :: String

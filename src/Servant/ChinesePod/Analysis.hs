@@ -15,6 +15,7 @@ module Servant.ChinesePod.Analysis (
 
 import Prelude hiding (Word, words)
 import Control.Monad
+import Data.Binary (Binary, encodeFile, decodeFile)
 import Data.IORef
 import Data.List (intercalate, sortBy)
 import Data.Map (Map)
@@ -62,7 +63,7 @@ data AnalysisDynamic = AnalysisDynamic {
       -- | Words we have left to chose lessons for
       analysisTodo :: [Word]
 
-      -- | Lessons we already chosen
+      -- | Lessons we already chosen (in the order we picked them)
     , analysisPicked :: [V3Id]
 
       -- | Lessons still available
@@ -98,6 +99,10 @@ data RelevantLesson = RelevantLesson {
 instance PrettyVal AnalysisStatic
 instance PrettyVal AnalysisDynamic
 instance PrettyVal RelevantLesson
+
+instance Binary AnalysisStatic
+instance Binary AnalysisDynamic
+instance Binary RelevantLesson
 
 instance Show AnalysisStatic  where show = dumpStr
 instance Show AnalysisDynamic where show = dumpStr
@@ -182,6 +187,16 @@ computeInverse vocab = Map.fromList . map go
     containsIn f simpl (v3id, lesson) = do
       guard $ simpl `elem` map source (f lesson)
       return v3id
+
+{-------------------------------------------------------------------------------
+  Saving/loading
+-------------------------------------------------------------------------------}
+
+save :: FilePath -> IO ()
+save fp = encodeFile fp =<< readIORef globalAnalysisState
+
+open :: FilePath -> IO ()
+open fp = writeIORef globalAnalysisState =<< decodeFile fp
 
 {-------------------------------------------------------------------------------
   Query the state
@@ -284,6 +299,13 @@ summarizeUsing lessonKey wordKey = do
              $ analysisAvailable
     putStrLn $ ""
 
+    putStrLn $ "Picked lessons (" ++ show (length analysisPicked) ++ ")"
+    putStrLn $ "---------------------------------------------------------------"
+    putStrLn $ intercalate "\n"
+             $ map (show . summarizeLesson)
+             $ analysisPicked
+    putStrLn $ ""
+
 {-------------------------------------------------------------------------------
   Different kinds of sorting functions
 -------------------------------------------------------------------------------}
@@ -299,3 +321,54 @@ wordNumKey WordSummary{..} = length wordSummaryInKey
 -- | Summarize using default sorting
 summarize :: IO ()
 summarize = summarizeUsing lessonNumKey wordNumKey
+
+{-------------------------------------------------------------------------------
+  Operations on the dynamic state
+-------------------------------------------------------------------------------}
+
+filterLessons :: ((Lesson, RelevantLesson) -> Bool) -> IO ()
+filterLessons p = modifyIORef globalAnalysisState aux
+  where
+    -- We only modify the dynamic part but need the static part in order
+    -- to provide the predicate with the full info about the lesson
+    aux :: (AnalysisStatic, AnalysisDynamic)
+        -> (AnalysisStatic, AnalysisDynamic)
+    aux (AnalysisStatic{..}, AnalysisDynamic{..}) =
+        ( AnalysisStatic{..}
+        , AnalysisDynamic{
+             analysisAvailable = filter p' analysisAvailable
+           , ..
+          }
+        )
+      where
+        p' :: V3Id -> Bool
+        p' lessonId = p ( analysisAllLessons Map.! lessonId
+                        , analysisRelevant   Map.! lessonId
+                        )
+
+filterByLevel :: (Level -> Bool) -> IO ()
+filterByLevel p = filterLessons (p . level . fst)
+
+-- | Pick a class
+pick :: V3Id -> IO ()
+pick lessonId = modifyIORef globalAnalysisState aux
+  where
+    aux :: (AnalysisStatic, AnalysisDynamic)
+        -> (AnalysisStatic, AnalysisDynamic)
+    aux (AnalysisStatic{..}, AnalysisDynamic{..}) =
+        ( AnalysisStatic{..}
+        , AnalysisDynamic{
+            analysisTodo      = filter (not . inLesson) analysisTodo
+          , analysisPicked    = analysisPicked ++ [lessonId]
+          , analysisAvailable = filter (/= lessonId) analysisAvailable
+          }
+        )
+      where
+        -- TODO: This only removes the word if it was in the _key_ vocabulary for
+        -- the lesson we picked. We may also want to consider the supplemental
+        -- vocabulary.
+        inLesson :: Word -> Bool
+        inLesson Word{..} = source `elem` relKey pickedLesson
+
+        pickedLesson :: RelevantLesson
+        pickedLesson = analysisRelevant Map.! lessonId

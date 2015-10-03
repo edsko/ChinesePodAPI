@@ -62,6 +62,7 @@ import Data.Map (Map)
 import Data.Maybe (catMaybes)
 import Data.Ord (comparing)
 import Data.Proxy
+import Data.String (IsString)
 import Data.Text (Text)
 import Data.Typeable
 import GHC.Generics
@@ -207,13 +208,13 @@ data RespGetUserInfo = RespGetUserInfo {
 -------------------------------------------------------------------------------}
 
 newtype UserId = UserId { userIdString :: String }
-  deriving (Show, Generic, Data, Eq, Ord, FromJSON, ToText, FromText)
+  deriving (Show, Generic, Data, Eq, Ord, FromJSON, ToText, FromText, IsString)
 
 newtype AccessToken = AccessToken { accessTokenString :: String }
-  deriving (Show, Generic, Data, Eq, Ord, FromJSON, ToText, FromText)
+  deriving (Show, Generic, Data, Eq, Ord, FromJSON, ToText, FromText, IsString)
 
 newtype V3Id = V3Id { v3IdString :: String }
-  deriving (Show, Generic, Data, Eq, Ord, FromJSON, ToText, FromText)
+  deriving (Show, Generic, Data, Eq, Ord, FromJSON, ToText, FromText, IsString)
 
 -- | Some ChinesePod requests simply return OK
 data OK = OK
