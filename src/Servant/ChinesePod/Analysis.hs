@@ -19,6 +19,7 @@ import Data.Binary (Binary, encodeFile, decodeFile)
 import Data.IORef
 import Data.List (intercalate, sortBy, partition)
 import Data.Map (Map)
+import Data.Set (Set)
 import Data.Maybe (catMaybes)
 import Data.Ord (comparing)
 import GHC.Generics (Generic)
@@ -87,16 +88,16 @@ type AnalysisState = (AnalysisStatic, AnalysisDynamic)
 -- > not (null (relKey ++ relSup))
 data RelevantLesson = RelevantLesson {
       -- | Relevant key vocabulary
-      relKey :: [Simpl]
+      relKey :: [Word]
 
       -- | Relevant supplemental vocabulary
-    , relSup :: [Simpl]
+    , relSup :: [Word]
 
-      -- | Number of irrelevant words in the key vocabulary
-    , irrelKey :: Int
+      -- | Irrelevant words in the key vocabulary
+    , irrelKey :: [Word]
 
-      -- | Number of irrelevant words in the supplemental vocabulary
-    , irrelSup :: Int
+      -- | Irrelevant words in the supplemental vocabulary
+    , irrelSup :: [Word]
     }
   deriving (Generic, Show)
 
@@ -161,12 +162,15 @@ cullRelevant words = Map.mapMaybe relevantLesson
       return RelevantLesson {
           relKey   = relKeyKeep
         , relSup   = relSupKeep
-        , irrelKey = irrelKey + length relKeyDrop
-        , irrelSup = irrelSup + length relSupDrop
+        , irrelKey = irrelKey ++ relKeyDrop
+        , irrelSup = irrelSup ++ relSupDrop
         }
 
-    isRelevantWord :: Simpl -> Bool
-    isRelevantWord = (`Set.member` Set.fromList (map source words))
+    isRelevantWord :: Word -> Bool
+    isRelevantWord Word{..} = source `Set.member` words'
+
+    words' :: Set Simpl
+    words' = Set.fromList $ map source words
 
 -- | Initial (crude) set of relevant lessons
 --
@@ -177,10 +181,10 @@ allRelevant = Map.map aux
   where
     aux :: Lesson -> RelevantLesson
     aux Lesson{..} = RelevantLesson{
-        relKey   = map source key
-      , relSup   = map source sup
-      , irrelKey = 0
-      , irrelSup = 0
+        relKey   = key
+      , relSup   = sup
+      , irrelKey = []
+      , irrelSup = []
       }
 
 computeInverse :: Map V3Id Lesson
@@ -217,14 +221,18 @@ open fp = writeIORef globalAnalysisState =<< decodeFile fp
   Query the state
 -------------------------------------------------------------------------------}
 
+-- | Information about a lesson
+--
+-- For the irrelevant vocabulary we record the HSK levels that word appears in
+-- so that we can judge just how irrelevant they are. 
 data LessonSummary = LessonSummary {
       lessonSummaryId       :: V3Id
     , lessonSummaryTitle    :: String
-    , lessonSummaryRelKey   :: [Simpl]
-    , lessonSummaryRelSup   :: [Simpl]
+    , lessonSummaryRelKey   :: [Word]
+    , lessonSummaryRelSup   :: [Word]
     , lessonSummaryLevel    :: Level
-    , lessonSummaryIrrelKey :: Int
-    , lessonSummaryIrrelSup :: Int
+    , lessonSummaryIrrelKey :: [(Word, [HSKLevel])]
+    , lessonSummaryIrrelSup :: [(Word, [HSKLevel])]
     }
 
 data WordSummary = WordSummary {
@@ -238,22 +246,29 @@ instance Show LessonSummary where
         v3IdString lessonSummaryId
       , " ("
       , lessonSummaryTitle
-      , "): "
-      , intercalate "," lessonSummaryRelKey
-      , "/"
-      , intercalate "," lessonSummaryRelSup
-      , " ("
+      , ", "
       , show $ lessonSummaryLevel
-      , ","
+      , "): "
+      , intercalate "," $ map source lessonSummaryRelKey
+      , "/"
+      , intercalate "," $ map source lessonSummaryRelSup
+      , " vs "
+      , intercalate "," $ map sourceWithLevel lessonSummaryIrrelKey
+      , "/"
+      , intercalate "," $ map sourceWithLevel lessonSummaryIrrelSup
+      , " ("
       , show $ length lessonSummaryRelKey
       , "/"
       , show $ length lessonSummaryRelSup
-      , ","
-      , show lessonSummaryIrrelKey
+      , " vs "
+      , show $ length lessonSummaryIrrelKey
       , "/"
-      , show lessonSummaryIrrelSup
+      , show $ length lessonSummaryIrrelSup
       , ")"
       ]
+    where
+      sourceWithLevel :: (Word, [HSKLevel]) -> String
+      sourceWithLevel (Word{..}, levels) = source ++ show levels
 
 instance Show WordSummary where
   show WordSummary{..} =  concat [
@@ -279,10 +294,13 @@ summarizeUsing lessonKey wordKey = do
             , lessonSummaryRelKey   = relKey
             , lessonSummaryRelSup   = relSup
             , lessonSummaryLevel    = level
-            , lessonSummaryIrrelKey = irrelKey
-            , lessonSummaryIrrelSup = irrelSup
+            , lessonSummaryIrrelKey = map withLevel irrelKey
+            , lessonSummaryIrrelSup = map withLevel irrelSup
             }
           where
+            withLevel :: Word -> (Word, [HSKLevel])
+            withLevel word = (word, map fst . hskLevel . source $ word)
+
             Lesson{..} = analysisAllLessons Map.! lessonId
 
     let summarizeWord :: Word -> WordSummary
@@ -388,39 +406,42 @@ pick lessonId = updateAnalysisState aux
         analysisAvailable' = cullRelevant analysisTodo' $
                                Map.delete lessonId analysisAvailable
 
-        -- TODO: This only removes the word if it was in the _key_ vocabulary for
-        -- the lesson we picked. We may also want to consider the supplemental
-        -- vocabulary.
         inLesson :: Word -> Bool
-        inLesson Word{..} = source `elem` relKey pickedLesson
+        inLesson Word{..} = source `Set.member` pickedLessonWords
 
         pickedLesson :: RelevantLesson
         pickedLesson = analysisAvailable Map.! lessonId
+
+        -- TODO: This only removes the word if it was in the _key_ vocabulary
+        -- for the lesson we picked. We may also want to consider the
+        -- supplemental vocabulary.
+        pickedLessonWords :: Set Simpl
+        pickedLessonWords = Set.fromList $ map source (relKey pickedLesson)
 
 {-------------------------------------------------------------------------------
   HSK level for each word
 -------------------------------------------------------------------------------}
 
-data HSKLevel a = HSK1 a | HSK2 a | HSK3 a | HSK4 a | HSK5 a | HSK6 a
-  deriving (Generic, Show)
+type HSKLevel = Int
 
-instance PrettyVal a => PrettyVal (HSKLevel a)
-
-hskLevel :: Simpl -> [HSKLevel Word]
+hskLevel :: Simpl -> [(HSKLevel, Word)]
 hskLevel simpl = Map.findWithDefault [] simpl hskIndex
 
-hskIndex :: Map Simpl [HSKLevel Word]
+hskIndex :: Map Simpl [(HSKLevel, Word)]
 hskIndex = Map.unionsWith (++) [
-      indexFor HSK1 hsk1
-    , indexFor HSK2 hsk2
-    , indexFor HSK3 hsk3
-    , indexFor HSK4 hsk4
-    , indexFor HSK5 hsk5
-    , indexFor HSK6 hsk6
+      indexFor 1 hsk1
+    , indexFor 2 hsk2
+    , indexFor 3 hsk3
+    , indexFor 4 hsk4
+    , indexFor 5 hsk5
+    , indexFor 6 hsk6
     ]
   where
-    indexFor :: (Word -> HSKLevel Word) -> [Word] -> Map Simpl [HSKLevel Word]
+    indexFor :: HSKLevel -> [Word] -> Map Simpl [(HSKLevel, Word)]
     indexFor level = Map.fromList . map go
       where
-        go :: Word -> (Simpl, [HSKLevel Word])
-        go word@Word{..} = (source, [level word])
+        go :: Word -> (Simpl, [(HSKLevel, Word)])
+        go word@Word{..} = (source, [(level, word)])
+
+showHskLevel :: Simpl -> IO ()
+showHskLevel = putStrLn . dumpStr . hskLevel
