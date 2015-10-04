@@ -400,3 +400,34 @@ pick lessonId = updateAnalysisState aux
 
         pickedLesson :: RelevantLesson
         pickedLesson = analysisAvailable Map.! lessonId
+
+{-------------------------------------------------------------------------------
+  HSK level for each word
+-------------------------------------------------------------------------------}
+
+data HSKLevel a = HSK1 a | HSK2 a | HSK3 a | HSK4 a | HSK5 a | HSK6 a
+  deriving (Generic)
+
+instance PrettyVal a => PrettyVal (HSKLevel a)
+instance PrettyVal a => Show      (HSKLevel a) where show = dumpStr
+
+-- There is some problem with unicode; hskLevel "爱" doesn't return anything
+-- (conversely, this is listed as a word without any corresponding CP lessons)
+hskLevel :: Simpl -> [HSKLevel Word]
+hskLevel simpl = Map.findWithDefault [] simpl hskIndex
+
+hskIndex :: Map Simpl [HSKLevel Word]
+hskIndex = Map.unionsWith (++) [
+      indexFor HSK1 hsk1
+    , indexFor HSK2 hsk2
+    , indexFor HSK3 hsk3
+    , indexFor HSK4 hsk4
+    , indexFor HSK5 hsk5
+    , indexFor HSK6 hsk6
+    ]
+  where
+    indexFor :: (Word -> HSKLevel Word) -> [Word] -> Map Simpl [HSKLevel Word]
+    indexFor level = Map.fromList . map go
+      where
+        go :: Word -> (Simpl, [HSKLevel Word])
+        go word@Word{..} = (source, [level word])
