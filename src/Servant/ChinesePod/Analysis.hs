@@ -144,12 +144,12 @@ analysisStatic (Vocab vocab) words = AnalysisStatic {
 
 -- | Initial dynamic analysis state
 analysisDynamic :: AnalysisStatic -> AnalysisDynamic
-analysisDynamic AnalysisStatic{..} = AnalysisDynamic{
-      analysisTodo      = analysisAllWords
-    , analysisPicked    = []
-    , analysisAvailable = cullRelevant analysisAllWords $
-                            allRelevant analysisAllLessons
-    }
+analysisDynamic AnalysisStatic{..} = AnalysisDynamic{..}
+  where
+    analysisTodo      = analysisAllWords
+    analysisPicked    = []
+    analysisAvailable = cullRelevant analysisTodo $
+                          allRelevant analysisAllLessons
 
 -- | Cull relevant lessons to a new word list
 cullRelevant :: [Word]
@@ -367,11 +367,16 @@ pick lessonId = updateAnalysisState aux
   where
     aux :: AnalysisStatic -> AnalysisDynamic -> AnalysisDynamic
     aux AnalysisStatic{..} AnalysisDynamic{..} = AnalysisDynamic{
-          analysisTodo      = filter (not . inLesson) analysisTodo
-        , analysisPicked    = analysisPicked ++ [(lessonId, pickedLesson)]
-        , analysisAvailable = Map.delete lessonId analysisAvailable
+          analysisTodo      = analysisTodo'
+        , analysisPicked    = analysisPicked'
+        , analysisAvailable = analysisAvailable'
         }
       where
+        analysisTodo'      = filter (not . inLesson) analysisTodo
+        analysisPicked'    = analysisPicked ++ [(lessonId, pickedLesson)]
+        analysisAvailable' = cullRelevant analysisTodo' $
+                               Map.delete lessonId analysisAvailable
+
         -- TODO: This only removes the word if it was in the _key_ vocabulary for
         -- the lesson we picked. We may also want to consider the supplemental
         -- vocabulary.
