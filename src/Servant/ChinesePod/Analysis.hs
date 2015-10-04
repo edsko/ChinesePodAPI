@@ -326,6 +326,21 @@ summarizeUsing lessonKey wordKey = do
              $ analysisPicked
     putStrLn $ ""
 
+-- | Show information about a given lesson
+infoLesson :: V3Id -> IO ()
+infoLesson lessonId = do
+    (AnalysisStatic{..}, AnalysisDynamic{..}) <- readIORef globalAnalysisState
+
+    print $ analysisAllLessons Map.! lessonId
+
+    forM_ (lookup lessonId analysisPicked) $ \relevantLesson -> do
+      putStrLn "We picked this lesson:"
+      print relevantLesson
+
+    forM_ (Map.lookup lessonId analysisAvailable) $ \relevantLesson -> do
+      putStrLn "This lesson is available:"
+      print relevantLesson
+
 {-------------------------------------------------------------------------------
   Different kinds of sorting functions
 -------------------------------------------------------------------------------}
