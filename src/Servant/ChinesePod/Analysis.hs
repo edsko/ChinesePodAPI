@@ -52,7 +52,7 @@ data AnalysisStatic = AnalysisStatic {
       -- supplemental vocabulary.
     , analysisInverse :: Map Simpl ([V3Id], [V3Id])
     }
-  deriving (Generic)
+  deriving (Generic, Show)
 
 -- | The dynamic part of the analysis: words we've covered, lesosns we picked
 data AnalysisDynamic = AnalysisDynamic {
@@ -76,7 +76,7 @@ data AnalysisDynamic = AnalysisDynamic {
       -- the other data).
     , analysisAvailable :: Map V3Id RelevantLesson
     }
-  deriving (Generic)
+  deriving (Generic, Show)
 
 type AnalysisState = (AnalysisStatic, AnalysisDynamic)
 
@@ -98,7 +98,7 @@ data RelevantLesson = RelevantLesson {
       -- | Number of irrelevant words in the supplemental vocabulary
     , irrelSup :: Int
     }
-  deriving (Generic)
+  deriving (Generic, Show)
 
 instance PrettyVal AnalysisStatic
 instance PrettyVal AnalysisDynamic
@@ -107,10 +107,6 @@ instance PrettyVal RelevantLesson
 instance Binary AnalysisStatic
 instance Binary AnalysisDynamic
 instance Binary RelevantLesson
-
-instance Show AnalysisStatic  where show = dumpStr
-instance Show AnalysisDynamic where show = dumpStr
-instance Show RelevantLesson  where show = dumpStr
 
 globalAnalysisState :: IORef AnalysisState
 {-# NOINLINE globalAnalysisState #-}
@@ -331,15 +327,15 @@ infoLesson :: V3Id -> IO ()
 infoLesson lessonId = do
     (AnalysisStatic{..}, AnalysisDynamic{..}) <- readIORef globalAnalysisState
 
-    print $ analysisAllLessons Map.! lessonId
+    putStrLn . dumpStr $ analysisAllLessons Map.! lessonId
 
     forM_ (lookup lessonId analysisPicked) $ \relevantLesson -> do
       putStrLn "We picked this lesson:"
-      print relevantLesson
+      putStrLn . dumpStr $ relevantLesson
 
     forM_ (Map.lookup lessonId analysisAvailable) $ \relevantLesson -> do
       putStrLn "This lesson is available:"
-      print relevantLesson
+      putStrLn . dumpStr $ relevantLesson
 
 {-------------------------------------------------------------------------------
   Different kinds of sorting functions
@@ -406,13 +402,10 @@ pick lessonId = updateAnalysisState aux
 -------------------------------------------------------------------------------}
 
 data HSKLevel a = HSK1 a | HSK2 a | HSK3 a | HSK4 a | HSK5 a | HSK6 a
-  deriving (Generic)
+  deriving (Generic, Show)
 
 instance PrettyVal a => PrettyVal (HSKLevel a)
-instance PrettyVal a => Show      (HSKLevel a) where show = dumpStr
 
--- There is some problem with unicode; hskLevel "爱" doesn't return anything
--- (conversely, this is listed as a word without any corresponding CP lessons)
 hskLevel :: Simpl -> [HSKLevel Word]
 hskLevel simpl = Map.findWithDefault [] simpl hskIndex
 

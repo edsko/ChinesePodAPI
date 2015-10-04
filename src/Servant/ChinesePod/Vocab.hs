@@ -30,7 +30,7 @@ data Lesson = Lesson {
     , key   :: [Word]
     , sup   :: [Word]
     }
-  deriving (Generic, Data)
+  deriving (Generic, Data, Show)
 
 data Level =
     Newbie
@@ -39,19 +39,19 @@ data Level =
   | UpperIntermediate
   | Advanced
   | Media
-  deriving (Generic, Data, Eq, Ord)
+  deriving (Generic, Data, Eq, Ord, Show)
 
 data Word = Word {
       pinyin :: String
     , source :: String
     , target :: String
     }
-  deriving (Generic, Data)
+  deriving (Generic, Data, Show)
 
 data Vocab = Vocab {
       vocab :: Map V3Id Lesson
     }
-  deriving (Generic, Data)
+  deriving (Generic, Data, Show)
 
 instance Binary Lesson
 instance Binary Level
@@ -68,11 +68,6 @@ instance PrettyVal Word where
 instance PrettyVal Lesson
 instance PrettyVal Vocab
 instance PrettyVal Level
-
-instance Show Lesson where show = dumpStr
-instance Show Level  where show = dumpStr
-instance Show Vocab  where show = dumpStr
-instance Show Word   where show = dumpStr
 
 {-------------------------------------------------------------------------------
   Constructing from full lesson content

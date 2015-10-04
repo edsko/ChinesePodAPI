@@ -17,16 +17,16 @@ spliceStickyStudy = fmap concat . mapM (uncurry go)
     go :: FilePath -> Name -> Q [Dec]
     go fp nm = do
       words <- runIO $ readStickyStudy fp
-      typ <- sigD nm [t| [Word] |]
-      def <- valD (varP nm) (normalB (lift words)) []
+      typ   <- sigD nm [t| [Word] |]
+      def   <- valD (varP nm) (normalB (lift words)) []
       return $ [typ, def]
 
-    -- We don't really on the type class instance
+    -- We don't rely on a type class instance
     lift :: [Word] -> Q Exp
     lift = dataToExpQ (const Nothing)
 
 readStickyStudy :: FilePath -> IO [Word]
-readStickyStudy = fmap parseStickyStudy . readFile
+readStickyStudy = fmap (parseStickyStudy . dropBOM) . readFile
 
 parseStickyStudy :: String -> [Word]
 parseStickyStudy = map go . map tabs . lines
@@ -47,3 +47,8 @@ explode needle = go
     go haystack = case break (== needle) haystack of
                    (xs, "")                 -> [xs]
                    (xs, _needle':haystack') -> xs : go haystack'
+
+-- | Drop unicode BOM character if present
+dropBOM :: String -> String
+dropBOM ('\65279':str) = str
+dropBOM str            = str
