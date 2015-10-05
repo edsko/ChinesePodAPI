@@ -151,6 +151,13 @@ analysisDynamic AnalysisStatic{..} = AnalysisDynamic{..}
     analysisAvailable = cullRelevant analysisTodo $
                           allRelevant analysisAllLessons
 
+-- TODO: We cull only when we pick a lesson, by removing the words from that
+-- lesson from the relevant list. but we shouldn't add those to the irrelevant
+-- list: they're not irrelevant,we've just already covered them.
+-- So we should pass a set of words we _picked_ rather than a set of words
+-- we have yet to do to 'cullRelevant', and then define 'analysisDynamic' in
+-- a different way.
+
 -- | Cull relevant lessons to a new word list
 cullRelevant :: [Word]
              -> Map V3Id RelevantLesson
