@@ -7,9 +7,10 @@ module Servant.ChinesePod.HSK.Aux (
   ) where
 
 import Prelude hiding (Word, words)
-import Servant.ChinesePod.Vocab
+import Data.Char (isSpace)
 import Language.Haskell.TH
 import Language.Haskell.TH.Quote
+import Servant.ChinesePod.Vocab
 
 spliceStickyStudy :: [(FilePath, Name)] -> Q [Dec]
 spliceStickyStudy = fmap concat . mapM (uncurry go)
@@ -36,8 +37,10 @@ parseStickyStudy = map go . map tabs . lines
     go line = error $ "Could not translate " ++ show line
 
 -- | Split a string on each tab character
+--
+-- We also trim whitespace from all fields
 tabs :: String -> [String]
-tabs = explode '\t'
+tabs = map trim . explode '\t'
 
 -- | Split a string at the specified delimeter
 explode :: Char -> String -> [String]
@@ -52,3 +55,11 @@ explode needle = go
 dropBOM :: String -> String
 dropBOM ('\65279':str) = str
 dropBOM str            = str
+
+-- | Trim whitespace
+trim :: String -> String
+trim = rtrim . ltrim
+  where
+    ltrim, rtrim :: String -> String
+    ltrim = dropWhile isSpace
+    rtrim = reverse . ltrim . reverse
