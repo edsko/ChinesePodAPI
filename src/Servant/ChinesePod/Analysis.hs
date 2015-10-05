@@ -94,10 +94,13 @@ data RelevantLesson = RelevantLesson {
     , relSup :: [Word]
 
       -- | Irrelevant words in the key vocabulary
-    , irrelKey :: [Word]
+      --
+      -- We also record the HSK levels they appear in. This is useful for
+      -- filtering/zooming.
+    , irrelKey :: [(Word, [HSKLevel])]
 
       -- | Irrelevant words in the supplemental vocabulary
-    , irrelSup :: [Word]
+    , irrelSup :: [(Word, [HSKLevel])]
     }
   deriving (Generic, Show)
 
@@ -162,8 +165,8 @@ cullRelevant words = Map.mapMaybe relevantLesson
       return RelevantLesson {
           relKey   = relKeyKeep
         , relSup   = relSupKeep
-        , irrelKey = irrelKey ++ relKeyDrop
-        , irrelSup = irrelSup ++ relSupDrop
+        , irrelKey = irrelKey ++ map withLevel relKeyDrop
+        , irrelSup = irrelSup ++ map withLevel relSupDrop
         }
 
     isRelevantWord :: Word -> Bool
@@ -171,6 +174,9 @@ cullRelevant words = Map.mapMaybe relevantLesson
 
     words' :: Set Simpl
     words' = Set.fromList $ map source words
+
+    withLevel :: Word -> (Word, [HSKLevel])
+    withLevel w = (w, map fst . hskLevel . source $ w)
 
 -- | Initial (crude) set of relevant lessons
 --
@@ -224,7 +230,7 @@ open fp = writeIORef globalAnalysisState =<< decodeFile fp
 -- | Information about a lesson
 --
 -- For the irrelevant vocabulary we record the HSK levels that word appears in
--- so that we can judge just how irrelevant they are. 
+-- so that we can judge just how irrelevant they are.
 data LessonSummary = LessonSummary {
       lessonSummaryId       :: V3Id
     , lessonSummaryTitle    :: String
@@ -287,21 +293,19 @@ summarizeUsing :: (Ord a, Ord b) =>
 summarizeUsing lessonKey wordKey = do
     (AnalysisStatic{..}, AnalysisDynamic{..}) <- readIORef globalAnalysisState
 
-    let summarizeLesson :: V3Id -> RelevantLesson -> LessonSummary
-        summarizeLesson lessonId RelevantLesson{..} = LessonSummary {
+    let pairLesson :: V3Id -> RelevantLesson -> (Lesson, RelevantLesson)
+        pairLesson lId relevant = (analysisAllLessons Map.! lId, relevant)
+
+    let summarizeLesson :: V3Id -> (Lesson, RelevantLesson) -> LessonSummary
+        summarizeLesson lessonId (Lesson{..}, RelevantLesson{..}) = LessonSummary {
               lessonSummaryId       = lessonId
             , lessonSummaryTitle    = title
             , lessonSummaryRelKey   = relKey
             , lessonSummaryRelSup   = relSup
             , lessonSummaryLevel    = level
-            , lessonSummaryIrrelKey = map withLevel irrelKey
-            , lessonSummaryIrrelSup = map withLevel irrelSup
+            , lessonSummaryIrrelKey = irrelKey
+            , lessonSummaryIrrelSup = irrelSup
             }
-          where
-            withLevel :: Word -> (Word, [HSKLevel])
-            withLevel word = (word, map fst . hskLevel . source $ word)
-
-            Lesson{..} = analysisAllLessons Map.! lessonId
 
     let summarizeWord :: Word -> WordSummary
         summarizeWord Word{..} = WordSummary {
@@ -322,22 +326,35 @@ summarizeUsing lessonKey wordKey = do
              $ analysisTodo
     putStrLn $ ""
 
-    putStrLn $ "Available lessons (" ++ show (length analysisAvailable) ++ ")"
+    -- Get available lesson filtered by current focus
+    zoomedIn <- isZoomedIn
+    inFocus  <- getFocus
+
+    let analysisAvailable', analysisPicked' :: [(V3Id, (Lesson, RelevantLesson))]
+        analysisAvailable' = Map.toList
+                           $ Map.filter inFocus
+                           $ Map.mapWithKey pairLesson
+                           $ analysisAvailable
+
+        analysisPicked' = mapWithKey pairLesson
+                        $ analysisPicked
+
+    putStrLn $ "Available lessons (" ++ show (length analysisAvailable') ++ ")"
+            ++ if zoomedIn then " (zoomed in)" else ""
     putStrLn $ "---------------------------------------------------------------"
     putStrLn $ intercalate "\n"
              $ map show
              $ sortBy (comparing lessonKey)
              $ map (uncurry summarizeLesson)
-             $ Map.toList
-             $ analysisAvailable
+             $ analysisAvailable'
     putStrLn $ ""
 
-    putStrLn $ "Picked lessons (" ++ show (length analysisPicked) ++ ")"
+    putStrLn $ "Picked lessons (" ++ show (length analysisPicked') ++ ")"
     putStrLn $ "---------------------------------------------------------------"
     putStrLn $ intercalate "\n"
              $ map show
              $ map (uncurry summarizeLesson)
-             $ analysisPicked
+             $ analysisPicked'
     putStrLn $ ""
 
 -- | Show information about a given lesson
@@ -372,23 +389,37 @@ summarize :: IO ()
 summarize = summarizeUsing lessonNumKey wordNumKey
 
 {-------------------------------------------------------------------------------
+  Predicates on lessons
+-------------------------------------------------------------------------------}
+
+type LessonPredicate = (Lesson, RelevantLesson) -> Bool
+
+atLevel :: [Level] -> LessonPredicate
+atLevel ls (Lesson{..}, _) = level `elem` ls
+
+-- | Only allow irrelevant words in the key vocab from the specified HSK levels
+keyInHSK :: [HSKLevel] -> LessonPredicate
+keyInHSK ls (_, RelevantLesson{..}) = all (any (`elem` ls) . snd) irrelKey
+
+-- | Only allow irrelevant words in the key vocab from the specified HSK levels
+supInHSK :: [HSKLevel] -> LessonPredicate
+supInHSK ls (_, RelevantLesson{..}) = all (any (`elem` ls) . snd) irrelSup
+
+{-------------------------------------------------------------------------------
   Operations on the dynamic state
 -------------------------------------------------------------------------------}
 
-filterLessons :: ((Lesson, RelevantLesson) -> Bool) -> IO ()
+filterLessons :: LessonPredicate -> IO ()
 filterLessons p = updateAnalysisState aux
   where
     aux :: AnalysisStatic -> AnalysisDynamic -> AnalysisDynamic
     aux AnalysisStatic{..} AnalysisDynamic{..} = AnalysisDynamic{
-           analysisAvailable = Map.filterWithKey p' analysisAvailable
-         , ..
+          analysisAvailable = Map.filterWithKey p' analysisAvailable
+        , ..
         }
       where
         p' :: V3Id -> RelevantLesson -> Bool
         p' lessonId relevant = p (analysisAllLessons Map.! lessonId, relevant)
-
-filterByLevel :: (Level -> Bool) -> IO ()
-filterByLevel p = filterLessons (p . level . fst)
 
 -- | Pick a class
 pick :: V3Id -> IO ()
@@ -419,6 +450,60 @@ pick lessonId = updateAnalysisState aux
         pickedLessonWords = Set.fromList $ map source (relKey pickedLesson)
 
 {-------------------------------------------------------------------------------
+  Focusing on a subset
+-------------------------------------------------------------------------------}
+
+-- | Add an additional constraint on the focus
+zoomIn :: LessonPredicate -> IO ()
+zoomIn p = modifyIORef globalFocus $ FocusZoom p
+
+-- | Undo one 'zoomIn'
+zoomOut :: IO ()
+zoomOut = modifyIORef globalFocus go
+  where
+    go :: Focus -> Focus
+    go FocusAll         = FocusAll
+    go (FocusZoom _ ps) = ps
+
+-- | Focus only on lessons satisfying the specified predciate
+setFocus :: LessonPredicate -> IO ()
+setFocus = writeIORef globalFocus . predicateToFocus
+  where
+    predicateToFocus :: LessonPredicate -> Focus
+    predicateToFocus p = FocusZoom p FocusAll
+
+-- | Get current focus as a predicate
+getFocus :: IO LessonPredicate
+getFocus = focusToPredicate <$> readIORef globalFocus
+  where
+    focusToPredicate :: Focus -> LessonPredicate
+    focusToPredicate FocusAll         _ = True
+    focusToPredicate (FocusZoom p ps) l = p l && focusToPredicate ps l
+
+-- | Zoom all the way out
+resetFocus :: IO ()
+resetFocus = writeIORef globalFocus FocusAll
+
+-- | Are we applying some predicates?
+isZoomedIn :: IO Bool
+isZoomedIn = do
+    focus <- readIORef globalFocus
+    case focus of
+      FocusAll   -> return False
+      _otherwise -> return True
+
+data Focus =
+    -- | Show all available lessons
+    FocusAll
+
+    -- | Limit the focus
+  | FocusZoom LessonPredicate Focus
+
+globalFocus :: IORef Focus
+{-# NOINLINE globalFocus #-}
+globalFocus = unsafePerformIO $ newIORef FocusAll
+
+{-------------------------------------------------------------------------------
   HSK level for each word
 -------------------------------------------------------------------------------}
 
@@ -445,3 +530,13 @@ hskIndex = Map.unionsWith (++) [
 
 showHskLevel :: Simpl -> IO ()
 showHskLevel = putStrLn . dumpStr . hskLevel
+
+{-------------------------------------------------------------------------------
+  Auxiliary
+-------------------------------------------------------------------------------}
+
+mapWithKey :: forall k a b. (k -> a -> b) -> [(k,a)] -> [(k,b)]
+mapWithKey f = map go
+  where
+    go :: (k,a) -> (k,b)
+    go (k,a) = (k, f k a)
