@@ -228,16 +228,20 @@ open fp = writeIORef globalAnalysisState =<< decodeFile fp
 -------------------------------------------------------------------------------}
 
 -- | Information about a lesson
---
--- For the irrelevant vocabulary we record the HSK levels that word appears in
--- so that we can judge just how irrelevant they are.
 data LessonSummary = LessonSummary {
       lessonSummaryId       :: V3Id
     , lessonSummaryTitle    :: String
     , lessonSummaryRelKey   :: [Word]
     , lessonSummaryRelSup   :: [Word]
     , lessonSummaryLevel    :: Level
+
+      -- | Irrelevant words in the key vocab, along with their HSK level
+      --
+      -- We record the HSK level so we can judge how irrelevant they are. Also,
+      -- this should not include any "harmless" words.
     , lessonSummaryIrrelKey :: [(Word, [HSKLevel])]
+
+      -- | Irrelevant words in the sup vocab. See also 'lessonSummaryIrrelKey'.
     , lessonSummaryIrrelSup :: [(Word, [HSKLevel])]
     }
 
@@ -279,10 +283,11 @@ instance Show LessonSummary where
 instance Show WordSummary where
   show WordSummary{..} =  concat [
         wordSummarySimpl
-      , ": "
+      , " ("
       , show $ length wordSummaryInKey
       , "/"
       , show $ length wordSummaryInSup
+      , ")"
       ]
 
 -- | Show a readable summary of what's left to do
@@ -292,6 +297,10 @@ summarizeUsing :: (Ord a, Ord b) =>
                -> IO ()
 summarizeUsing lessonKey wordKey = do
     (AnalysisStatic{..}, AnalysisDynamic{..}) <- readIORef globalAnalysisState
+    allHarmless <- getHarmless
+
+    let notHarmless :: Word -> Bool
+        notHarmless w = not (source w `Set.member` allHarmless)
 
     let pairLesson :: V3Id -> RelevantLesson -> (Lesson, RelevantLesson)
         pairLesson lId relevant = (analysisAllLessons Map.! lId, relevant)
@@ -303,8 +312,8 @@ summarizeUsing lessonKey wordKey = do
             , lessonSummaryRelKey   = relKey
             , lessonSummaryRelSup   = relSup
             , lessonSummaryLevel    = level
-            , lessonSummaryIrrelKey = irrelKey
-            , lessonSummaryIrrelSup = irrelSup
+            , lessonSummaryIrrelKey = filter (notHarmless . fst) irrelKey
+            , lessonSummaryIrrelSup = filter (notHarmless . fst) irrelSup
             }
 
     let summarizeWord :: Word -> WordSummary
@@ -316,15 +325,6 @@ summarizeUsing lessonKey wordKey = do
           where
             inKey, inSup :: [V3Id]
             (inKey, inSup) = analysisInverse Map.! source
-
-    putStrLn $ "Words left (" ++ show (length analysisTodo) ++ ")"
-    putStrLn $ "---------------------------------------------------------------"
-    putStrLn $ intercalate "\n"
-             $ map show
-             $ sortBy (comparing wordKey)
-             $ map summarizeWord
-             $ analysisTodo
-    putStrLn $ ""
 
     -- Get available lesson filtered by current focus
     zoomedIn <- isZoomedIn
@@ -357,6 +357,15 @@ summarizeUsing lessonKey wordKey = do
              $ analysisPicked'
     putStrLn $ ""
 
+    putStrLn $ "Words left (" ++ show (length analysisTodo) ++ ")"
+    putStrLn $ "---------------------------------------------------------------"
+    putStrLn $ intercalate ","
+             $ map show
+             $ sortBy (comparing wordKey)
+             $ map summarizeWord
+             $ analysisTodo
+    putStrLn $ ""
+
 -- | Show information about a given lesson
 infoLesson :: V3Id -> IO ()
 infoLesson lessonId = do
@@ -383,6 +392,12 @@ lessonNumKey LessonSummary{..} = length lessonSummaryRelKey
 -- | Number of lessons that have this word in their key vocabulary
 wordNumKey :: WordSummary -> Int
 wordNumKey WordSummary{..} = length wordSummaryInKey
+
+-- | Number of words in the irrelevant key vocabulary that are not in the
+-- specified HSK levels
+reallyIrrelevantKey :: [HSKLevel] -> LessonSummary -> Int
+reallyIrrelevantKey ls LessonSummary{..} =
+  length $ filter (none (`elem` ls) . snd) lessonSummaryIrrelKey
 
 -- | Summarize using default sorting
 summarize :: IO ()
@@ -532,6 +547,42 @@ showHskLevel :: Simpl -> IO ()
 showHskLevel = putStrLn . dumpStr . hskLevel
 
 {-------------------------------------------------------------------------------
+  "Harmless" words are irrelevant words that don't really matter; for instance,
+  a lesson might have 十一 in the vocab which isn't listed explicitly in any
+  HSK, but shouldn't really count towards the number of irrelevant words in
+  that lesson.
+-------------------------------------------------------------------------------}
+
+-- | Save the list of harmless words
+--
+-- We store the list of harmless words separately so we can load it independent
+-- of the rest of the state
+saveHarmless :: FilePath -> IO ()
+saveHarmless fp = encodeFile fp =<< readIORef globalHarmless
+
+-- | Load a list of harmless words
+openHarmless :: FilePath -> IO ()
+openHarmless fp = writeIORef globalHarmless =<< decodeFile fp
+
+-- | Get current list of harmless words
+getHarmless :: IO (Set Simpl)
+getHarmless = readIORef globalHarmless
+
+-- | Show current words marked as harmless
+showHarmless :: IO ()
+showHarmless = putStrLn . format . Set.toList =<< readIORef globalHarmless
+  where
+    format = intercalate ","
+
+-- | Mark a word as harmless
+harmless :: Simpl -> IO ()
+harmless w = modifyIORef globalHarmless $ Set.insert w
+
+globalHarmless :: IORef (Set Simpl)
+{-# NOINLINE globalHarmless #-}
+globalHarmless = unsafePerformIO $ newIORef Set.empty
+
+{-------------------------------------------------------------------------------
   Auxiliary
 -------------------------------------------------------------------------------}
 
@@ -540,3 +591,6 @@ mapWithKey f = map go
   where
     go :: (k,a) -> (k,b)
     go (k,a) = (k, f k a)
+
+none :: (a -> Bool) -> [a] -> Bool
+none p = not . any p
