@@ -148,57 +148,56 @@ analysisDynamic AnalysisStatic{..} = AnalysisDynamic{..}
   where
     analysisTodo      = analysisAllWords
     analysisPicked    = []
-    analysisAvailable = cullRelevant analysisTodo $
-                          allRelevant analysisAllLessons
+    analysisAvailable = initRelevant (simplSet analysisTodo) analysisAllLessons
 
--- TODO: We cull only when we pick a lesson, by removing the words from that
--- lesson from the relevant list. but we shouldn't add those to the irrelevant
--- list: they're not irrelevant,we've just already covered them.
--- So we should pass a set of words we _picked_ rather than a set of words
--- we have yet to do to 'cullRelevant', and then define 'analysisDynamic' in
--- a different way.
-
--- | Cull relevant lessons to a new word list
-cullRelevant :: [Word]
+-- | Initial list of relevant lessons
+initRelevant :: Set Simpl
+             -> Map V3Id Lesson
              -> Map V3Id RelevantLesson
-             -> Map V3Id RelevantLesson
-cullRelevant words = Map.mapMaybe relevantLesson
+initRelevant words = Map.mapMaybe relevantLesson
   where
-    relevantLesson :: RelevantLesson -> Maybe RelevantLesson
-    relevantLesson RelevantLesson{..} = do
-      let (relKeyKeep, relKeyDrop) = partition isRelevantWord relKey
-          (relSupKeep, relSupDrop) = partition isRelevantWord relSup
-      guard $ not (null (relKeyKeep ++ relSupKeep))
-      return RelevantLesson {
-          relKey   = relKeyKeep
-        , relSup   = relSupKeep
-        , irrelKey = irrelKey ++ map withLevel relKeyDrop
-        , irrelSup = irrelSup ++ map withLevel relSupDrop
-        }
+    relevantLesson :: Lesson -> Maybe RelevantLesson
+    relevantLesson Lesson{..} = do
+      let (relKey, irrelKey') = partition isRelevantWord key
+          (relSup, irrelSup') = partition isRelevantWord sup
+          irrelKey = map withLevel irrelKey'
+          irrelSup = map withLevel irrelSup'
+      guard $ not (null (relKey ++ relSup))
+      return RelevantLesson{..}
 
     isRelevantWord :: Word -> Bool
-    isRelevantWord Word{..} = source `Set.member` words'
-
-    words' :: Set Simpl
-    words' = Set.fromList $ map source words
+    isRelevantWord Word{..} = source `Set.member` words
 
     withLevel :: Word -> (Word, [HSKLevel])
     withLevel w = (w, map fst . hskLevel . source $ w)
 
--- | Initial (crude) set of relevant lessons
+simplSet :: [Word] -> Set Simpl
+simplSet = Set.fromList . map source
+
+-- | Cull relevant lessons after we've picked a lesson and so covered new words
 --
--- In order to construct a 'relevant' set, we first compute a set where
--- we consider _all_ words to be relevant.
-allRelevant :: Map V3Id Lesson -> Map V3Id RelevantLesson
-allRelevant = Map.map aux
+-- We remove these words from the 'relevant' list beacuse they are no longer
+-- relevant (and so should no longer count towards how good a choice a lesson
+-- is), but we don't add them to the irrelevant words because they should also
+-- not count towards how bad a choice a lesson is.
+cullRelevant :: Set Simpl
+             -> Map V3Id RelevantLesson
+             -> Map V3Id RelevantLesson
+cullRelevant newCovered = Map.mapMaybe relevantLesson
   where
-    aux :: Lesson -> RelevantLesson
-    aux Lesson{..} = RelevantLesson{
-        relKey   = key
-      , relSup   = sup
-      , irrelKey = []
-      , irrelSup = []
-      }
+    relevantLesson :: RelevantLesson -> Maybe RelevantLesson
+    relevantLesson RelevantLesson{..} = do
+      let relKey' = filter isRelevantWord relKey
+          relSup' = filter isRelevantWord relSup
+      guard $ not (null (relKey' ++ relSup'))
+      return RelevantLesson {
+          relKey = relKey'
+        , relSup = relSup'
+        , ..
+        }
+
+    isRelevantWord :: Word -> Bool
+    isRelevantWord Word{..} = not (source `Set.member` newCovered)
 
 computeInverse :: Map V3Id Lesson
                -> [Simpl]
@@ -456,7 +455,7 @@ pick lessonId = updateAnalysisState aux
       where
         analysisTodo'      = filter (not . inLesson) analysisTodo
         analysisPicked'    = analysisPicked ++ [(lessonId, pickedLesson)]
-        analysisAvailable' = cullRelevant analysisTodo' $
+        analysisAvailable' = cullRelevant pickedLessonWords $
                                Map.delete lessonId analysisAvailable
 
         inLesson :: Word -> Bool
@@ -469,7 +468,7 @@ pick lessonId = updateAnalysisState aux
         -- for the lesson we picked. We may also want to consider the
         -- supplemental vocabulary.
         pickedLessonWords :: Set Simpl
-        pickedLessonWords = Set.fromList $ map source (relKey pickedLesson)
+        pickedLessonWords = simplSet (relKey pickedLesson)
 
 {-------------------------------------------------------------------------------
   Focusing on a subset
