@@ -46,7 +46,7 @@ data Word = Word {
     , source :: String
     , target :: String
     }
-  deriving (Generic, Data, Show)
+  deriving (Generic, Data, Eq, Ord, Show)
 
 data Vocab = Vocab {
       vocab :: Map V3Id Lesson

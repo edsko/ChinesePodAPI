@@ -17,7 +17,7 @@ import Prelude hiding (Word, words)
 import Control.Monad
 import Data.Binary (Binary, encodeFile, decodeFile)
 import Data.IORef
-import Data.List (intercalate, sortBy, partition)
+import Data.List (intercalate, sortBy, partition, nub)
 import Data.Map (Map)
 import Data.Set (Set)
 import Data.Maybe (catMaybes)
@@ -552,6 +552,13 @@ hskIndex = Map.unionsWith (++) [
 showHskLevel :: Simpl -> IO ()
 showHskLevel = putStrLn . dumpStr . hskLevel
 
+-- | Try to find split a word into smaller words which are in HSK levels
+hskSplits :: Simpl -> [(HSKLevel, Word)]
+hskSplits = nub . concatMap hskLevel . nub . concat . splits
+
+showHskSplits :: Simpl -> IO ()
+showHskSplits = putStrLn . dumpStr . hskSplits
+
 {-------------------------------------------------------------------------------
   "Harmless" words are irrelevant words that don't really matter; for instance,
   a lesson might have 十一 in the vocab which isn't listed explicitly in any
@@ -600,3 +607,10 @@ mapWithKey f = map go
 
 none :: (a -> Bool) -> [a] -> Bool
 none p = not . any p
+
+-- | All different ways to split a list into sublists (without reordering)
+splits :: forall a. [a] -> [[[a]]]
+splits []     = [[]]
+splits [x]    = [[[x]]]
+splits (x:xs) = map (\(ys:yss) -> (x:ys):yss) (splits xs)
+             ++ map ([x] :)                   (splits xs)
