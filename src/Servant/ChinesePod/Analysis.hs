@@ -429,8 +429,6 @@ infoWord source = do
 -- | Search for a word in the vocabulary of all lessons
 --
 -- (including this word appearing as a subword)
---
--- TODO: This currently only searches the key vocabulary
 searchVocab :: Simpl -> IO ()
 searchVocab word = do
     (AnalysisStatic{..}, AnalysisDynamic{..}) <- readIORef globalAnalysisState
@@ -439,7 +437,7 @@ searchVocab word = do
     let isMatching :: (V3Id, Lesson)
                    -> Maybe (V3Id, Lesson, RelevantLesson, String)
         isMatching (v3id, lesson) = do
-          guard $ any (\word' -> word `isInfixOf` source word') (key lesson)
+          guard $ any (\word' -> word `isInfixOf` source word') (key lesson ++ sup lesson)
           let mAlreadyPicked      = lookup v3id analysisPicked
               mAvailable          = Map.lookup v3id analysisAvailable
               (relevant, comment) = case (mAlreadyPicked, mAvailable) of
