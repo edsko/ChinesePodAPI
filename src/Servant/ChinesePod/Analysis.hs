@@ -17,7 +17,7 @@ import Prelude hiding (Word, words)
 import Control.Monad
 import Data.Binary (Binary, encodeFile, decodeFile)
 import Data.IORef
-import Data.List (intercalate, sortBy, partition, nub)
+import Data.List (intercalate, sortBy, partition, nub, isInfixOf)
 import Data.Map (Map)
 import Data.Set (Set)
 import Data.Maybe (catMaybes)
@@ -558,6 +558,19 @@ hskSplits = nub . concatMap hskLevel . nub . concat . splits
 
 showHskSplits :: Simpl -> IO ()
 showHskSplits = putStrLn . dumpStr . hskSplits
+
+searchHsk :: String -> IO ()
+searchHsk str = putStrLn . dumpStr
+              $ filter matches
+              $ concat
+              $ Map.elems hskIndex
+  where
+    matches :: (HSKLevel, Word) -> Bool
+    matches (_, Word{..}) = or [
+        str `isInfixOf` pinyin
+      , str `isInfixOf` source
+      , str `isInfixOf` target
+      ]
 
 {-------------------------------------------------------------------------------
   "Harmless" words are irrelevant words that don't really matter; for instance,
