@@ -450,12 +450,16 @@ searchVocab word = do
     let matchingLessons :: [(V3Id, Lesson, RelevantLesson, String)]
         matchingLessons = mapMaybe isMatching (Map.toList analysisAllLessons)
 
+    summarized <- forM matchingLessons $ \(v3id, lesson, relevant, comment) -> do
+      summary <- summarizeLesson v3id (lesson, relevant)
+      return (summary, comment)
+
     putStrLn "This word appears in the following in-focus lessons:"
     putStrLn "-----------------------------------------------------------------"
-    forM_ matchingLessons $ \(v3id, lesson, relevant, comment) -> do
-      summary <- summarizeLesson v3id (lesson, relevant)
-      putStrLn $ show summary ++ " (" ++ comment ++ ")"
-      return (v3id, lesson, relevant, comment)
+    putStrLn $ intercalate "\n"
+             $ map (\(summary, comment) -> show summary ++ " (" ++ comment ++ ")")
+             $ sortBy (comparing (lessonNumKey . fst))
+             $ summarized
   where
     irrelevant :: Lesson -> RelevantLesson
     irrelevant Lesson{..} = RelevantLesson{
