@@ -20,7 +20,7 @@ import Data.IORef
 import Data.List (intercalate, sortBy, partition, nub, isInfixOf)
 import Data.Map (Map)
 import Data.Set (Set)
-import Data.Maybe (catMaybes)
+import Data.Maybe (mapMaybe)
 import Data.Ord (comparing)
 import GHC.Generics (Generic)
 import System.IO.Unsafe (unsafePerformIO)
@@ -168,9 +168,6 @@ initRelevant words = Map.mapMaybe relevantLesson
     isRelevantWord :: Word -> Bool
     isRelevantWord Word{..} = source `Set.member` words
 
-    withLevel :: Word -> (Word, [HSKLevel])
-    withLevel w = (w, map fst . hskLevel . source $ w)
-
 simplSet :: [Word] -> Set Simpl
 simplSet = Set.fromList . map source
 
@@ -209,8 +206,8 @@ computeInverse vocab = Map.fromList . map go
 
     go :: Simpl -> (Simpl, ([V3Id], [V3Id]))
     go word = ( word
-              , ( catMaybes $ map (containsIn key word) vocab'
-                , catMaybes $ map (containsIn sup word) vocab'
+              , ( mapMaybe (containsIn key word) vocab'
+                , mapMaybe (containsIn sup word) vocab'
                 )
               )
 
@@ -409,17 +406,66 @@ infoWord source = do
 
     available <- mapM (uncurry summarizeLesson) =<< getInFocusAvailable
 
-    putStrLn "This word in the key vocab of the following available lessons:"
+    putStrLn "This word is in the key vocab of the following available lessons:"
+    putStrLn $ "---------------------------------------------------------------"
     putStrLn $ intercalate "\n"
              $ map show
              $ filter ((`elem` inKey) . lessonSummaryId)
              $ available
+    putStrLn $ ""
 
-    putStrLn "This word in the supplemental vocab of the following available lessons:"
+    putStrLn "This word is in the sup vocab of the following available lessons:"
+    putStrLn $ "---------------------------------------------------------------"
     putStrLn $ intercalate "\n"
              $ map show
              $ filter ((`elem` inSup) . lessonSummaryId)
              $ available
+    putStrLn $ ""
+
+{-------------------------------------------------------------------------------
+  Search vocabulary for a word
+-------------------------------------------------------------------------------}
+
+-- | Search for a word in the vocabulary of all lessons
+--
+-- (including this word appearing as a subword)
+--
+-- TODO: This currently only searches the key vocabulary
+searchVocab :: Simpl -> IO ()
+searchVocab word = do
+    (AnalysisStatic{..}, AnalysisDynamic{..}) <- readIORef globalAnalysisState
+    inFocus <- getFocus
+
+    let isMatching :: (V3Id, Lesson)
+                   -> Maybe (V3Id, Lesson, RelevantLesson, String)
+        isMatching (v3id, lesson) = do
+          guard $ any (\word' -> word `isInfixOf` source word') (key lesson)
+          let mAlreadyPicked      = lookup v3id analysisPicked
+              mAvailable          = Map.lookup v3id analysisAvailable
+              (relevant, comment) = case (mAlreadyPicked, mAvailable) of
+                (Just alreadyPicked, _) -> (alreadyPicked, "already picked")
+                (_, Just available)     -> (available, "available")
+                (_, _)                  -> (irrelevant lesson, "other")
+          guard $ inFocus (lesson, relevant)
+          return (v3id, lesson, relevant, comment)
+
+    let matchingLessons :: [(V3Id, Lesson, RelevantLesson, String)]
+        matchingLessons = mapMaybe isMatching (Map.toList analysisAllLessons)
+
+    putStrLn "This word appears in the following in-focus lessons:"
+    putStrLn "-----------------------------------------------------------------"
+    forM_ matchingLessons $ \(v3id, lesson, relevant, comment) -> do
+      summary <- summarizeLesson v3id (lesson, relevant)
+      putStrLn $ show summary ++ " (" ++ comment ++ ")"
+      return (v3id, lesson, relevant, comment)
+  where
+    irrelevant :: Lesson -> RelevantLesson
+    irrelevant Lesson{..} = RelevantLesson{
+        relKey = []
+      , relSup = []
+      , irrelKey = map withLevel key
+      , irrelSup = map withLevel sup
+      }
 
 {-------------------------------------------------------------------------------
   Different kinds of sorting functions
@@ -586,6 +632,9 @@ hskIndex = Map.unionsWith (++) [
       where
         go :: Word -> (Simpl, [(HSKLevel, Word)])
         go word@Word{..} = (source, [(level, word)])
+
+withLevel :: Word -> (Word, [HSKLevel])
+withLevel w = (w, map fst . hskLevel . source $ w)
 
 showHskLevel :: Simpl -> IO ()
 showHskLevel = putStrLn . dumpStr . hskLevel
