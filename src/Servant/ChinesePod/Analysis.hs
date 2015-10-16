@@ -296,71 +296,84 @@ instance Show WordSummary where
       , ")"
       ]
 
+summarizeLesson :: V3Id -> (Lesson, RelevantLesson) -> IO LessonSummary
+summarizeLesson lessonId (Lesson{..}, RelevantLesson{..}) = do
+    allHarmless <- getHarmless
+
+    let notHarmless :: Word -> Bool
+        notHarmless w = not (source w `Set.member` allHarmless)
+
+    return LessonSummary {
+        lessonSummaryId       = lessonId
+      , lessonSummaryTitle    = title
+      , lessonSummaryRelKey   = relKey
+      , lessonSummaryRelSup   = relSup
+      , lessonSummaryLevel    = level
+      , lessonSummaryIrrelKey = filter (notHarmless . fst) irrelKey
+      , lessonSummaryIrrelSup = filter (notHarmless . fst) irrelSup
+      }
+
+summarizeWord :: Word -> IO WordSummary
+summarizeWord Word{..} = do
+    (AnalysisStatic{analysisInverse}, _dyn) <- readIORef globalAnalysisState
+
+    let inKey, inSup :: [V3Id]
+        (inKey, inSup) = analysisInverse Map.! source
+
+    return WordSummary {
+        wordSummarySimpl = source
+      , wordSummaryInKey = inKey
+      , wordSummaryInSup = inSup
+      }
+
+getInFocusAvailable :: IO [(V3Id, (Lesson, RelevantLesson))]
+getInFocusAvailable = do
+    (AnalysisStatic{analysisAllLessons}, AnalysisDynamic{analysisAvailable}) <- readIORef globalAnalysisState
+    inFocus <- getFocus
+
+    let pairLesson :: V3Id -> RelevantLesson -> (Lesson, RelevantLesson)
+        pairLesson lId relevant = (analysisAllLessons Map.! lId, relevant)
+
+    return $ Map.toList
+           $ Map.filter inFocus
+           $ Map.mapWithKey pairLesson
+           $ analysisAvailable
+
+getPicked :: IO [(V3Id, (Lesson, RelevantLesson))]
+getPicked = do
+    (AnalysisStatic{analysisAllLessons}, AnalysisDynamic{analysisPicked}) <- readIORef globalAnalysisState
+
+    let pairLesson :: V3Id -> RelevantLesson -> (Lesson, RelevantLesson)
+        pairLesson lId relevant = (analysisAllLessons Map.! lId, relevant)
+
+    return $ mapWithKey pairLesson
+           $ analysisPicked
+
 -- | Show a readable summary of what's left to do
 summarizeUsing :: (Ord a, Ord b) =>
                   (LessonSummary -> a) -- Sort key for lessons
                -> (WordSummary   -> b) -- Sort key forwords
                -> IO ()
 summarizeUsing lessonKey wordKey = do
-    (AnalysisStatic{..}, AnalysisDynamic{..}) <- readIORef globalAnalysisState
-    allHarmless <- getHarmless
+    (_static, AnalysisDynamic{analysisTodo}) <- readIORef globalAnalysisState
 
-    let notHarmless :: Word -> Bool
-        notHarmless w = not (source w `Set.member` allHarmless)
+    available <- mapM (uncurry summarizeLesson) =<< getInFocusAvailable
+    picked    <- mapM (uncurry summarizeLesson) =<< getPicked
+    todo      <- mapM summarizeWord analysisTodo
+    zoomedIn  <- isZoomedIn
 
-    let pairLesson :: V3Id -> RelevantLesson -> (Lesson, RelevantLesson)
-        pairLesson lId relevant = (analysisAllLessons Map.! lId, relevant)
-
-    let summarizeLesson :: V3Id -> (Lesson, RelevantLesson) -> LessonSummary
-        summarizeLesson lessonId (Lesson{..}, RelevantLesson{..}) = LessonSummary {
-              lessonSummaryId       = lessonId
-            , lessonSummaryTitle    = title
-            , lessonSummaryRelKey   = relKey
-            , lessonSummaryRelSup   = relSup
-            , lessonSummaryLevel    = level
-            , lessonSummaryIrrelKey = filter (notHarmless . fst) irrelKey
-            , lessonSummaryIrrelSup = filter (notHarmless . fst) irrelSup
-            }
-
-    let summarizeWord :: Word -> WordSummary
-        summarizeWord Word{..} = WordSummary {
-              wordSummarySimpl = source
-            , wordSummaryInKey = inKey
-            , wordSummaryInSup = inSup
-            }
-          where
-            inKey, inSup :: [V3Id]
-            (inKey, inSup) = analysisInverse Map.! source
-
-    -- Get available lesson filtered by current focus
-    zoomedIn <- isZoomedIn
-    inFocus  <- getFocus
-
-    let analysisAvailable', analysisPicked' :: [(V3Id, (Lesson, RelevantLesson))]
-        analysisAvailable' = Map.toList
-                           $ Map.filter inFocus
-                           $ Map.mapWithKey pairLesson
-                           $ analysisAvailable
-
-        analysisPicked' = mapWithKey pairLesson
-                        $ analysisPicked
-
-    putStrLn $ "Available lessons (" ++ show (length analysisAvailable') ++ ")"
+    putStrLn $ "Available lessons (" ++ show (length available) ++ ")"
             ++ if zoomedIn then " (zoomed in)" else ""
     putStrLn $ "---------------------------------------------------------------"
     putStrLn $ intercalate "\n"
              $ map show
              $ sortBy (comparing lessonKey)
-             $ map (uncurry summarizeLesson)
-             $ analysisAvailable'
+             $ available
     putStrLn $ ""
 
-    putStrLn $ "Picked lessons (" ++ show (length analysisPicked') ++ ")"
+    putStrLn $ "Picked lessons (" ++ show (length picked) ++ ")"
     putStrLn $ "---------------------------------------------------------------"
-    putStrLn $ intercalate "\n"
-             $ map show
-             $ map (uncurry summarizeLesson)
-             $ analysisPicked'
+    putStrLn $ intercalate "\n" $ map show picked
     putStrLn $ ""
 
     putStrLn $ "Words left (" ++ show (length analysisTodo) ++ ")"
@@ -368,8 +381,7 @@ summarizeUsing lessonKey wordKey = do
     putStrLn $ intercalate ","
              $ map show
              $ sortBy (comparing wordKey)
-             $ map summarizeWord
-             $ analysisTodo
+             $ todo
     putStrLn $ ""
 
 -- | Show information about a given lesson
@@ -386,6 +398,28 @@ infoLesson lessonId = do
     forM_ (Map.lookup lessonId analysisAvailable) $ \relevantLesson -> do
       putStrLn "This lesson is available:"
       putStrLn . dumpStr $ relevantLesson
+
+-- | Show information about a given word
+infoWord :: Simpl -> IO ()
+infoWord source = do
+    (AnalysisStatic{analysisInverse}, _dyn) <- readIORef globalAnalysisState
+
+    let inKey, inSup :: [V3Id]
+        (inKey, inSup) = analysisInverse Map.! source
+
+    available <- mapM (uncurry summarizeLesson) =<< getInFocusAvailable
+
+    putStrLn "This word in the key vocab of the following available lessons:"
+    putStrLn $ intercalate "\n"
+             $ map show
+             $ filter ((`elem` inKey) . lessonSummaryId)
+             $ available
+
+    putStrLn "This word in the supplemental vocab of the following available lessons:"
+    putStrLn $ intercalate "\n"
+             $ map show
+             $ filter ((`elem` inSup) . lessonSummaryId)
+             $ available
 
 {-------------------------------------------------------------------------------
   Different kinds of sorting functions
@@ -425,6 +459,10 @@ keyInHSK ls (_, RelevantLesson{..}) = all (any (`elem` ls) . snd) irrelKey
 -- | Only allow irrelevant words in the key vocab from the specified HSK levels
 supInHSK :: [HSKLevel] -> LessonPredicate
 supInHSK ls (_, RelevantLesson{..}) = all (any (`elem` ls) . snd) irrelSup
+
+-- | Maximum number of irrelevant words in the key vocab
+maxNumKeyIrrel :: Int -> LessonPredicate
+maxNumKeyIrrel n (_, RelevantLesson{..}) = length irrelKey <= n
 
 {-------------------------------------------------------------------------------
   Operations on the dynamic state

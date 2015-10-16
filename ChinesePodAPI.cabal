@@ -52,6 +52,7 @@ library
                        GeneralizedNewtypeDeriving
                        LambdaCase
                        MultiParamTypeClasses
+                       NamedFieldPuns
                        RecordWildCards
                        ScopedTypeVariables
                        TypeOperators
