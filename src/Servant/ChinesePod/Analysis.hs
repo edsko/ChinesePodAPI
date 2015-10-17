@@ -528,9 +528,11 @@ filterLessons p = updateAnalysisState aux
         p' :: V3Id -> RelevantLesson -> Bool
         p' lessonId relevant = p (analysisAllLessons Map.! lessonId, relevant)
 
--- | Pick a class
-pick :: V3Id -> IO ()
-pick lessonId = updateAnalysisState aux
+-- | Pick a lesson
+pick :: V3Id
+     -> Bool  -- ^ Should the sup vocab of the lesson be removed from TODO?
+     -> IO ()
+pick lessonId includeSup = updateAnalysisState aux
   where
     aux :: AnalysisStatic -> AnalysisDynamic -> AnalysisDynamic
     aux AnalysisStatic{..} AnalysisDynamic{..} = AnalysisDynamic{
@@ -550,11 +552,10 @@ pick lessonId = updateAnalysisState aux
         pickedLesson :: RelevantLesson
         pickedLesson = analysisAvailable Map.! lessonId
 
-        -- TODO: This only removes the word if it was in the _key_ vocabulary
-        -- for the lesson we picked. We may also want to consider the
-        -- supplemental vocabulary.
         pickedLessonWords :: Set Simpl
-        pickedLessonWords = simplSet (relKey pickedLesson)
+        pickedLessonWords = simplSet $
+          if includeSup then relKey pickedLesson ++ relSup pickedLesson
+                        else relKey pickedLesson
 
 {-------------------------------------------------------------------------------
   Focusing on a subset
