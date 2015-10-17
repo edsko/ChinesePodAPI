@@ -48,10 +48,10 @@ data AnalysisStatic = AnalysisStatic {
 
       -- | "Inverse" index: which lessons cover a certain word?
       --
-      -- For each word we record which lessons contain that word in their
-      -- key vocabulary and which lessons contain that word in their
-      -- supplemental vocabulary.
-    , analysisInverse :: Map Simpl ([V3Id], [V3Id])
+      -- We do not distinguish between key and supplemental vocabulary here,
+      -- but only consider supplemental vocabulary that appears in the dialog.
+      -- See comments for `RelevantLesson`.
+    , analysisInverse :: Map Simpl [V3Id]
     }
   deriving (Generic, Show)
 
@@ -85,22 +85,22 @@ type AnalysisState = (AnalysisStatic, AnalysisDynamic)
 --
 -- A lesson is "relevant" if
 --
--- > not (null (relKey ++ relSup))
+-- > not (null rel)
+--
+-- We do not distinguish between key and supplemental vocabulary here; it is
+-- too difficult to cover the HSK levels using only key vocabulary. However,
+-- we consider _only_ the supplemental vocabulary that actually appears in the
+-- dialogue. Vocabulary that does not appear in the dialogue does not help with
+-- studying for the HSK, but does not harm either. Hence, we just ignore it.
 data RelevantLesson = RelevantLesson {
-      -- | Relevant key vocabulary
-      relKey :: [Word]
+      -- | Relevant vocabulary
+      rel :: [Word]
 
-      -- | Relevant supplemental vocabulary
-    , relSup :: [Word]
-
-      -- | Irrelevant words in the key vocabulary
+      -- | Irrelevant vocabulary
       --
       -- We also record the HSK levels they appear in. This is useful for
       -- filtering/zooming.
-    , irrelKey :: [(Word, [HSKLevel])]
-
-      -- | Irrelevant words in the supplemental vocabulary
-    , irrelSup :: [(Word, [HSKLevel])]
+    , irrel :: [(Word, [HSKLevel])]
     }
   deriving (Generic, Show)
 
@@ -158,11 +158,9 @@ initRelevant words = Map.mapMaybe relevantLesson
   where
     relevantLesson :: Lesson -> Maybe RelevantLesson
     relevantLesson Lesson{..} = do
-      let (relKey, irrelKey') = partition isRelevantWord key
-          (relSup, irrelSup') = partition isRelevantWord sup
-          irrelKey = map withLevel irrelKey'
-          irrelSup = map withLevel irrelSup'
-      guard $ not (null (relKey ++ relSup))
+      let (rel, irrel') = partition isRelevantWord (key ++ supDialog)
+          irrel         = map withLevel irrel'
+      guard $ not (null rel)
       return RelevantLesson{..}
 
     isRelevantWord :: Word -> Bool
@@ -173,7 +171,7 @@ simplSet = Set.fromList . map source
 
 -- | Cull relevant lessons after we've picked a lesson and so covered new words
 --
--- We remove these words from the 'relevant' list beacuse they are no longer
+-- We remove these words from the 'relevant' list because they are no longer
 -- relevant (and so should no longer count towards how good a choice a lesson
 -- is), but we don't add them to the irrelevant words because they should also
 -- not count towards how bad a choice a lesson is.
@@ -184,36 +182,27 @@ cullRelevant newCovered = Map.mapMaybe relevantLesson
   where
     relevantLesson :: RelevantLesson -> Maybe RelevantLesson
     relevantLesson RelevantLesson{..} = do
-      let relKey' = filter isRelevantWord relKey
-          relSup' = filter isRelevantWord relSup
-      guard $ not (null (relKey' ++ relSup'))
-      return RelevantLesson {
-          relKey = relKey'
-        , relSup = relSup'
-        , ..
-        }
+      let rel' = filter isRelevantWord rel
+      guard $ not (null rel')
+      return RelevantLesson { rel = rel', .. }
 
     isRelevantWord :: Word -> Bool
     isRelevantWord Word{..} = not (source `Set.member` newCovered)
 
 computeInverse :: Map V3Id Lesson
                -> [Simpl]
-               -> Map Simpl ([V3Id], [V3Id])
+               -> Map Simpl [V3Id]
 computeInverse vocab = Map.fromList . map go
   where
     vocab' :: [(V3Id, Lesson)]
     vocab' = Map.toList vocab
 
-    go :: Simpl -> (Simpl, ([V3Id], [V3Id]))
-    go word = ( word
-              , ( mapMaybe (containsIn key word) vocab'
-                , mapMaybe (containsIn sup word) vocab'
-                )
-              )
+    go :: Simpl -> (Simpl, [V3Id])
+    go word = (word, mapMaybe (contains word) vocab')
 
-    containsIn :: (Lesson -> [Word]) -> Simpl -> (V3Id, Lesson) -> Maybe V3Id
-    containsIn f simpl (v3id, lesson) = do
-      guard $ simpl `elem` map source (f lesson)
+    contains :: Simpl -> (V3Id, Lesson) -> Maybe V3Id
+    contains simpl (v3id, lesson) = do
+      guard $ simpl `elem` map source (key lesson ++ supDialog lesson)
       return v3id
 
 {-------------------------------------------------------------------------------
@@ -231,27 +220,19 @@ open fp = writeIORef globalAnalysisState =<< decodeFile fp
 -------------------------------------------------------------------------------}
 
 -- | Information about a lesson
+--
+-- The list of irrelevant words should not include any harmless words.
 data LessonSummary = LessonSummary {
-      lessonSummaryId       :: V3Id
-    , lessonSummaryTitle    :: String
-    , lessonSummaryRelKey   :: [Word]
-    , lessonSummaryRelSup   :: [Word]
-    , lessonSummaryLevel    :: Level
-
-      -- | Irrelevant words in the key vocab, along with their HSK level
-      --
-      -- We record the HSK level so we can judge how irrelevant they are. Also,
-      -- this should not include any "harmless" words.
-    , lessonSummaryIrrelKey :: [(Word, [HSKLevel])]
-
-      -- | Irrelevant words in the sup vocab. See also 'lessonSummaryIrrelKey'.
-    , lessonSummaryIrrelSup :: [(Word, [HSKLevel])]
+      lessonSummaryId    :: V3Id
+    , lessonSummaryTitle :: String
+    , lessonSummaryLevel :: Level
+    , lessonSummaryRel   :: [Word]
+    , lessonSummaryIrrel :: [(Word, [HSKLevel])]
     }
 
 data WordSummary = WordSummary {
-      wordSummarySimpl :: Simpl
-    , wordSummaryInKey :: [V3Id]
-    , wordSummaryInSup :: [V3Id]
+      wordSummarySimpl     :: Simpl
+    , wordSummaryAppearsIn :: [V3Id]
     }
 
 instance Show LessonSummary where
@@ -262,21 +243,13 @@ instance Show LessonSummary where
       , ", "
       , show $ lessonSummaryLevel
       , "): "
-      , intercalate "," $ map source lessonSummaryRelKey
-      , "/"
-      , intercalate "," $ map source lessonSummaryRelSup
+      , intercalate "," $ map source lessonSummaryRel
       , " vs "
-      , intercalate "," $ map sourceWithLevel lessonSummaryIrrelKey
-      , "/"
-      , intercalate "," $ map sourceWithLevel lessonSummaryIrrelSup
+      , intercalate "," $ map sourceWithLevel lessonSummaryIrrel
       , " ("
-      , show $ length lessonSummaryRelKey
-      , "/"
-      , show $ length lessonSummaryRelSup
+      , show $ length lessonSummaryRel
       , " vs "
-      , show $ length lessonSummaryIrrelKey
-      , "/"
-      , show $ length lessonSummaryIrrelSup
+      , show $ length lessonSummaryIrrel
       , ")"
       ]
     where
@@ -287,9 +260,7 @@ instance Show WordSummary where
   show WordSummary{..} =  concat [
         wordSummarySimpl
       , " ("
-      , show $ length wordSummaryInKey
-      , "/"
-      , show $ length wordSummaryInSup
+      , show $ length wordSummaryAppearsIn
       , ")"
       ]
 
@@ -301,26 +272,20 @@ summarizeLesson lessonId (Lesson{..}, RelevantLesson{..}) = do
         notHarmless w = not (source w `Set.member` allHarmless)
 
     return LessonSummary {
-        lessonSummaryId       = lessonId
-      , lessonSummaryTitle    = title
-      , lessonSummaryRelKey   = relKey
-      , lessonSummaryRelSup   = relSup
-      , lessonSummaryLevel    = level
-      , lessonSummaryIrrelKey = filter (notHarmless . fst) irrelKey
-      , lessonSummaryIrrelSup = filter (notHarmless . fst) irrelSup
+        lessonSummaryId    = lessonId
+      , lessonSummaryTitle = title
+      , lessonSummaryLevel = level
+      , lessonSummaryRel   = rel
+      , lessonSummaryIrrel = filter (notHarmless . fst) irrel
       }
 
 summarizeWord :: Word -> IO WordSummary
 summarizeWord Word{..} = do
     (AnalysisStatic{analysisInverse}, _dyn) <- readIORef globalAnalysisState
 
-    let inKey, inSup :: [V3Id]
-        (inKey, inSup) = analysisInverse Map.! source
-
     return WordSummary {
-        wordSummarySimpl = source
-      , wordSummaryInKey = inKey
-      , wordSummaryInSup = inSup
+        wordSummarySimpl     = source
+      , wordSummaryAppearsIn = analysisInverse Map.! source
       }
 
 getInFocusAvailable :: IO [(V3Id, (Lesson, RelevantLesson))]
@@ -401,8 +366,8 @@ infoWord :: Simpl -> IO ()
 infoWord source = do
     (AnalysisStatic{analysisInverse}, _dyn) <- readIORef globalAnalysisState
 
-    let inKey, inSup :: [V3Id]
-        (inKey, inSup) = analysisInverse Map.! source
+    let appearsIn :: [V3Id]
+        appearsIn = analysisInverse Map.! source
 
     available <- mapM (uncurry summarizeLesson) =<< getInFocusAvailable
 
@@ -410,15 +375,7 @@ infoWord source = do
     putStrLn $ "---------------------------------------------------------------"
     putStrLn $ intercalate "\n"
              $ map show
-             $ filter ((`elem` inKey) . lessonSummaryId)
-             $ available
-    putStrLn $ ""
-
-    putStrLn "This word is in the sup vocab of the following available lessons:"
-    putStrLn $ "---------------------------------------------------------------"
-    putStrLn $ intercalate "\n"
-             $ map show
-             $ filter ((`elem` inSup) . lessonSummaryId)
+             $ filter ((`elem` appearsIn) . lessonSummaryId)
              $ available
     putStrLn $ ""
 
@@ -437,7 +394,7 @@ searchVocab word = do
     let isMatching :: (V3Id, Lesson)
                    -> Maybe (V3Id, Lesson, RelevantLesson, String)
         isMatching (v3id, lesson) = do
-          guard $ any (\word' -> word `isInfixOf` source word') (key lesson ++ sup lesson)
+          guard $ any (\word' -> word `isInfixOf` source word') (key lesson ++ supDialog lesson)
           let mAlreadyPicked      = lookup v3id analysisPicked
               mAvailable          = Map.lookup v3id analysisAvailable
               (relevant, comment) = case (mAlreadyPicked, mAvailable) of
@@ -458,38 +415,36 @@ searchVocab word = do
     putStrLn "-----------------------------------------------------------------"
     putStrLn $ intercalate "\n"
              $ map (\(summary, comment) -> show summary ++ " (" ++ comment ++ ")")
-             $ sortBy (comparing (lessonNumKey . fst))
+             $ sortBy (comparing (countLessonRel . fst))
              $ summarized
   where
     irrelevant :: Lesson -> RelevantLesson
     irrelevant Lesson{..} = RelevantLesson{
-        relKey = []
-      , relSup = []
-      , irrelKey = map withLevel key
-      , irrelSup = map withLevel sup
+        rel   = []
+      , irrel = map withLevel (key ++ supDialog)
       }
 
 {-------------------------------------------------------------------------------
   Different kinds of sorting functions
 -------------------------------------------------------------------------------}
 
--- | Number of relevant words in the key vocabulary of the lesson
-lessonNumKey :: LessonSummary -> Int
-lessonNumKey LessonSummary{..} = length lessonSummaryRelKey
+-- | Number of relevant words in the vocabulary of the lesson
+countLessonRel :: LessonSummary -> Int
+countLessonRel LessonSummary{..} = length lessonSummaryRel
 
 -- | Number of lessons that have this word in their key vocabulary
-wordNumKey :: WordSummary -> Int
-wordNumKey WordSummary{..} = length wordSummaryInKey
+countWordAppearsIn :: WordSummary -> Int
+countWordAppearsIn WordSummary{..} = length wordSummaryAppearsIn
 
 -- | Number of words in the irrelevant key vocabulary that are not in the
 -- specified HSK levels
-reallyIrrelevantKey :: [HSKLevel] -> LessonSummary -> Int
-reallyIrrelevantKey ls LessonSummary{..} =
-  length $ filter (none (`elem` ls) . snd) lessonSummaryIrrelKey
+countReallyIrrelevant :: [HSKLevel] -> LessonSummary -> Int
+countReallyIrrelevant ls LessonSummary{..} =
+  length $ filter (none (`elem` ls) . snd) lessonSummaryIrrel
 
 -- | Summarize using default sorting
 summarize :: IO ()
-summarize = summarizeUsing lessonNumKey wordNumKey
+summarize = summarizeUsing countLessonRel countWordAppearsIn
 
 {-------------------------------------------------------------------------------
   Predicates on lessons
@@ -500,17 +455,13 @@ type LessonPredicate = (Lesson, RelevantLesson) -> Bool
 atLevel :: [Level] -> LessonPredicate
 atLevel ls (Lesson{..}, _) = level `elem` ls
 
--- | Only allow irrelevant words in the key vocab from the specified HSK levels
-keyInHSK :: [HSKLevel] -> LessonPredicate
-keyInHSK ls (_, RelevantLesson{..}) = all (any (`elem` ls) . snd) irrelKey
+-- | Only allow irrelevant words from the specified HSK levels
+irrelInHSK :: [HSKLevel] -> LessonPredicate
+irrelInHSK ls (_, RelevantLesson{..}) = all (any (`elem` ls) . snd) irrel
 
--- | Only allow irrelevant words in the key vocab from the specified HSK levels
-supInHSK :: [HSKLevel] -> LessonPredicate
-supInHSK ls (_, RelevantLesson{..}) = all (any (`elem` ls) . snd) irrelSup
-
--- | Maximum number of irrelevant words in the key vocab
-maxNumKeyIrrel :: Int -> LessonPredicate
-maxNumKeyIrrel n (_, RelevantLesson{..}) = length irrelKey <= n
+-- | Maximum number of irrelevant words
+maxNumIrrel :: Int -> LessonPredicate
+maxNumIrrel n (_, RelevantLesson{..}) = length irrel <= n
 
 {-------------------------------------------------------------------------------
   Operations on the dynamic state
@@ -529,10 +480,8 @@ filterLessons p = updateAnalysisState aux
         p' lessonId relevant = p (analysisAllLessons Map.! lessonId, relevant)
 
 -- | Pick a lesson
-pick :: V3Id
-     -> Bool  -- ^ Should the sup vocab of the lesson be removed from TODO?
-     -> IO ()
-pick lessonId includeSup = updateAnalysisState aux
+pick :: V3Id -> IO ()
+pick lessonId = updateAnalysisState aux
   where
     aux :: AnalysisStatic -> AnalysisDynamic -> AnalysisDynamic
     aux AnalysisStatic{..} AnalysisDynamic{..} = AnalysisDynamic{
@@ -553,9 +502,7 @@ pick lessonId includeSup = updateAnalysisState aux
         pickedLesson = analysisAvailable Map.! lessonId
 
         pickedLessonWords :: Set Simpl
-        pickedLessonWords = simplSet $
-          if includeSup then relKey pickedLesson ++ relSup pickedLesson
-                        else relKey pickedLesson
+        pickedLessonWords = simplSet $ rel pickedLesson
 
 {-------------------------------------------------------------------------------
   Focusing on a subset

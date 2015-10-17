@@ -15,6 +15,7 @@ import Data.Binary (Binary, decodeFile)
 import Data.Data (Data)
 import Data.Map (Map)
 import Data.Maybe (catMaybes)
+import Data.List (partition, isInfixOf)
 import GHC.Generics
 import Text.Show.Pretty (PrettyVal(..))
 import qualified Data.Map as Map
@@ -28,7 +29,12 @@ data Lesson = Lesson {
     , level :: Level
     , hosts :: String
     , key   :: [Word]
-    , sup   :: [Word]
+
+      -- | Supplemental vocabulary that appears somewhere in the dialogue
+    , supDialog :: [Word]
+
+      -- | Supplemental vocabulary that does not appear in the dialogue
+    , supExtra :: [Word]
     }
   deriving (Generic, Data, Show)
 
@@ -58,7 +64,6 @@ instance PrettyVal Level
   Constructing from full lesson content
 -------------------------------------------------------------------------------}
 
--- TODO: filter out video lessons
 extractVocab :: [API.LessonContent] -> Vocab
 extractVocab = Vocab . Map.fromList . catMaybes . map go
   where
@@ -75,8 +80,15 @@ extractLesson API.LessonContent{..} = do
     level      <- extractLevel lessonContentLevel
     vocabulary <- lessonContentVocabulary
     let key = map extractWord $ API.vocabularyKeyVocab vocabulary
-    let sup = map extractWord $ API.vocabularySupVocab vocabulary
+        sup = map extractWord $ API.vocabularySupVocab vocabulary
+        (supDialog, supExtra) = partition wordInDialogue sup
     return Lesson{..}
+  where
+    wordInDialogue word = or [
+        inTranscription word lessonContentTranscription1
+      , inTranscription word lessonContentTranscription2
+      , maybe False (inDialogue word) lessonContentDialogue
+      ]
 
 extractLevel :: Maybe API.Level -> Maybe Level
 extractLevel Nothing                           = Nothing
@@ -94,6 +106,19 @@ extractWord API.Word{..} = Word {
     , source = wordSource
     , target = wordTarget
     }
+
+{-------------------------------------------------------------------------------
+  Splitting supplemental vocabulary
+-------------------------------------------------------------------------------}
+
+inTranscription :: Word -> String -> Bool
+inTranscription word = (source word `isInfixOf`)
+
+inDialogue :: Word -> [API.Sentence] -> Bool
+inDialogue = any . inSentence
+
+inSentence :: Word -> API.Sentence -> Bool
+inSentence word API.Sentence{..} = source word `isInfixOf` sentenceSource
 
 {-------------------------------------------------------------------------------
   I/O
