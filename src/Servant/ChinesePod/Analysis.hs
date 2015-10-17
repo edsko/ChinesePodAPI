@@ -220,13 +220,16 @@ open fp = writeIORef globalAnalysisState =<< decodeFile fp
 -------------------------------------------------------------------------------}
 
 -- | Information about a lesson
---
--- The list of irrelevant words should not include any harmless words.
 data LessonSummary = LessonSummary {
       lessonSummaryId    :: V3Id
     , lessonSummaryTitle :: String
     , lessonSummaryLevel :: Level
     , lessonSummaryRel   :: [Word]
+
+      -- | Irrelevant but harmless
+    , lessonSummaryHarmless :: [(Word, [HSKLevel])]
+
+      -- | Truly irrelevant
     , lessonSummaryIrrel :: [(Word, [HSKLevel])]
     }
 
@@ -235,48 +238,59 @@ data WordSummary = WordSummary {
     , wordSummaryAppearsIn :: [V3Id]
     }
 
-instance Show LessonSummary where
-  show LessonSummary{..} = concat [
-        v3IdString lessonSummaryId
-      , " ("
-      , lessonSummaryTitle
-      , ", "
-      , show $ lessonSummaryLevel
-      , "): "
-      , intercalate "," $ map source lessonSummaryRel
-      , " vs "
-      , intercalate "," $ map sourceWithLevel lessonSummaryIrrel
-      , " ("
-      , show $ length lessonSummaryRel
-      , " vs "
-      , show $ length lessonSummaryIrrel
-      , ")"
-      ]
-    where
-      sourceWithLevel :: (Word, [HSKLevel]) -> String
-      sourceWithLevel (Word{..}, levels) = source ++ show levels
+showLessonSummary :: Bool           -- ^ Show harmless?
+                  -> LessonSummary
+                  -> String
+showLessonSummary includeHarmless LessonSummary{..} = concat [
+      v3IdString lessonSummaryId
+    , " ("
+    , lessonSummaryTitle
+    , ", "
+    , show $ lessonSummaryLevel
+    , "): "
+    , intercalate "," $ map source lessonSummaryRel
+    , " vs "
+    , intercalate "," $ map sourceWithLevel lessonSummaryIrrel
+    , if includeHarmless
+        then "/" ++ intercalate "," (map sourceWithLevel lessonSummaryHarmless)
+        else ""
+    , " ("
+    , show $ length lessonSummaryRel
+    , " vs "
+    , show $ length lessonSummaryIrrel
+    , if includeHarmless
+        then "/" ++ show (length lessonSummaryHarmless)
+        else ""
+    , ")"
+    ]
+  where
+    sourceWithLevel :: (Word, [HSKLevel]) -> String
+    sourceWithLevel (Word{..}, levels) = source ++ show levels
 
-instance Show WordSummary where
-  show WordSummary{..} =  concat [
-        wordSummarySimpl
-      , " ("
-      , show $ length wordSummaryAppearsIn
-      , ")"
-      ]
+showWordSummary :: WordSummary -> String
+showWordSummary WordSummary{..} = concat [
+      wordSummarySimpl
+    , " ("
+    , show $ length wordSummaryAppearsIn
+    , ")"
+    ]
 
 summarizeLesson :: V3Id -> (Lesson, RelevantLesson) -> IO LessonSummary
 summarizeLesson lessonId (Lesson{..}, RelevantLesson{..}) = do
     allHarmless <- getHarmless
 
-    let notHarmless :: Word -> Bool
-        notHarmless w = not (source w `Set.member` allHarmless)
+    let isHarmless :: Word -> Bool
+        isHarmless w = source w `Set.member` allHarmless
+
+        (harmless, notHarmless) = partition (isHarmless . fst) irrel
 
     return LessonSummary {
-        lessonSummaryId    = lessonId
-      , lessonSummaryTitle = title
-      , lessonSummaryLevel = level
-      , lessonSummaryRel   = rel
-      , lessonSummaryIrrel = filter (notHarmless . fst) irrel
+        lessonSummaryId       = lessonId
+      , lessonSummaryTitle    = title
+      , lessonSummaryLevel    = level
+      , lessonSummaryRel      = rel
+      , lessonSummaryHarmless = harmless
+      , lessonSummaryIrrel    = notHarmless
       }
 
 summarizeWord :: Word -> IO WordSummary
@@ -328,20 +342,20 @@ summarizeUsing lessonKey wordKey = do
             ++ if zoomedIn then " (zoomed in)" else ""
     putStrLn $ "---------------------------------------------------------------"
     putStrLn $ intercalate "\n"
-             $ map show
+             $ map (showLessonSummary False)
              $ sortBy (comparing lessonKey)
              $ available
     putStrLn $ ""
 
     putStrLn $ "Picked lessons (" ++ show (length picked) ++ ")"
     putStrLn $ "---------------------------------------------------------------"
-    putStrLn $ intercalate "\n" $ map show picked
+    putStrLn $ intercalate "\n" $ map (showLessonSummary False) picked
     putStrLn $ ""
 
     putStrLn $ "Words left (" ++ show (length analysisTodo) ++ ")"
     putStrLn $ "---------------------------------------------------------------"
     putStrLn $ intercalate ","
-             $ map show
+             $ map showWordSummary
              $ sortBy (comparing wordKey)
              $ todo
     putStrLn $ ""
@@ -371,10 +385,10 @@ infoWord source = do
 
     available <- mapM (uncurry summarizeLesson) =<< getInFocusAvailable
 
-    putStrLn "This word is in the key vocab of the following available lessons:"
+    putStrLn "This word is in the vocab of the following available lessons:"
     putStrLn $ "---------------------------------------------------------------"
     putStrLn $ intercalate "\n"
-             $ map show
+             $ map (showLessonSummary False)
              $ filter ((`elem` appearsIn) . lessonSummaryId)
              $ available
     putStrLn $ ""
@@ -414,10 +428,14 @@ searchVocab word = do
     putStrLn "This word appears in the following in-focus lessons:"
     putStrLn "-----------------------------------------------------------------"
     putStrLn $ intercalate "\n"
-             $ map (\(summary, comment) -> show summary ++ " (" ++ comment ++ ")")
+             $ map showWithComment
              $ sortBy (comparing (countLessonRel . fst))
              $ summarized
   where
+    showWithComment :: (LessonSummary, String) -> String
+    showWithComment (summary, comment) = showLessonSummary True summary
+                                      ++ " (" ++ comment ++ ")"
+
     irrelevant :: Lesson -> RelevantLesson
     irrelevant Lesson{..} = RelevantLesson{
         rel   = []
@@ -638,8 +656,8 @@ showHarmless = putStrLn . format . Set.toList =<< readIORef globalHarmless
     format = intercalate ","
 
 -- | Mark a word as harmless
-harmless :: Simpl -> IO ()
-harmless w = modifyIORef globalHarmless $ Set.insert w
+markHarmless :: Simpl -> IO ()
+markHarmless w = modifyIORef globalHarmless $ Set.insert w
 
 globalHarmless :: IORef (Set Simpl)
 {-# NOINLINE globalHarmless #-}
