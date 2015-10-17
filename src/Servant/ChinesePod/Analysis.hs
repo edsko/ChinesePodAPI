@@ -23,6 +23,7 @@ import Data.Set (Set)
 import Data.Maybe (mapMaybe)
 import Data.Ord (comparing)
 import GHC.Generics (Generic)
+import System.IO
 import System.IO.Unsafe (unsafePerformIO)
 import Text.Show.Pretty (PrettyVal, dumpStr)
 import qualified Data.Map as Map hiding ((!))
@@ -690,6 +691,24 @@ markHarmless w = modifyIORef globalHarmless $ Set.insert w
 globalHarmless :: IORef (Set Simpl)
 {-# NOINLINE globalHarmless #-}
 globalHarmless = unsafePerformIO $ newIORef Set.empty
+
+{-------------------------------------------------------------------------------
+  Export
+-------------------------------------------------------------------------------}
+
+exportPleco :: String -> String -> IO ()
+exportPleco fileName topCategory = do
+    picked <- getPicked
+
+    withFile fileName AppendMode $ \h ->
+      forM_ (sortBy (comparing sortKey) picked) $
+        \(_v3Id, (Lesson{..}, RelevantLesson{..})) -> do
+          hPutStrLn h $ "//" ++ topCategory ++ "/" ++ title ++ " (" ++ dumpStr level ++ ")"
+          forM_ (rel ++ map fst irrel) $ hPutStrLn h . source
+  where
+    -- Sort by level, then by ID
+    sortKey :: (V3Id, (Lesson, RelevantLesson)) -> (Level, V3Id)
+    sortKey (v3id, (Lesson{..}, _)) = (level, v3id)
 
 {-------------------------------------------------------------------------------
   Auxiliary
