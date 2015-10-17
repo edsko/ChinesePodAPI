@@ -522,6 +522,21 @@ pick lessonId = updateAnalysisState aux
         pickedLessonWords :: Set Simpl
         pickedLessonWords = simplSet $ rel pickedLesson
 
+-- | Remove a word from TODO without actually covering it
+skip :: Simpl -> IO ()
+skip simpl = updateAnalysisState aux
+  where
+    aux :: AnalysisStatic -> AnalysisDynamic -> AnalysisDynamic
+    aux _ AnalysisDynamic{..} = AnalysisDynamic{
+          analysisTodo      = analysisTodo'
+        , analysisPicked    = analysisPicked
+        , analysisAvailable = analysisAvailable'
+        }
+      where
+        analysisTodo'      = filter ((/= simpl) . source) analysisTodo
+        analysisAvailable' = cullRelevant (Set.singleton simpl)
+                               analysisAvailable
+
 {-------------------------------------------------------------------------------
   Focusing on a subset
 -------------------------------------------------------------------------------}
