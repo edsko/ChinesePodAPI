@@ -10,7 +10,7 @@ import Prelude hiding (Word, words)
 import Data.Char (isSpace)
 import Language.Haskell.TH
 import Language.Haskell.TH.Quote
-import Servant.ChinesePod.Vocab
+import Servant.ChinesePod.Vocab.Word
 
 spliceStickyStudy :: [(FilePath, Name)] -> Q [Dec]
 spliceStickyStudy = fmap concat . mapM (uncurry go)

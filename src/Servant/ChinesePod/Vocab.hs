@@ -16,11 +16,11 @@ import Data.Data (Data)
 import Data.Map (Map)
 import Data.Maybe (catMaybes)
 import GHC.Generics
-import Text.Show.Pretty (PrettyVal(..), dumpStr)
-import qualified Data.Map         as Map
-import qualified Text.Show.Pretty as P
+import Text.Show.Pretty (PrettyVal(..))
+import qualified Data.Map as Map
 
 import Servant.ChinesePod.API (V3Id(..))
+import Servant.ChinesePod.Vocab.Word
 import qualified Servant.ChinesePod.API as API
 
 data Lesson = Lesson {
@@ -41,13 +41,6 @@ data Level =
   | Media
   deriving (Generic, Data, Eq, Ord, Show)
 
-data Word = Word {
-      pinyin :: String
-    , source :: String
-    , target :: String
-    }
-  deriving (Generic, Data, Eq, Ord, Show)
-
 data Vocab = Vocab {
       vocab :: Map V3Id Lesson
     }
@@ -56,14 +49,6 @@ data Vocab = Vocab {
 instance Binary Lesson
 instance Binary Level
 instance Binary Vocab
-instance Binary Word
-
-instance PrettyVal Word where
-  prettyVal Word{..} = P.Con "Word" [
-      prettyVal pinyin
-    , prettyVal source
-    , prettyVal target
-    ]
 
 instance PrettyVal Lesson
 instance PrettyVal Vocab
