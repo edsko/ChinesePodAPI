@@ -31,6 +31,7 @@ import qualified Data.Set as Set
 
 import Servant.ChinesePod.Vocab
 import Servant.ChinesePod.HSK.HSK2012
+import qualified Servant.ChinesePod.API as API
 
 {-------------------------------------------------------------------------------
   State
@@ -699,16 +700,27 @@ globalHarmless = unsafePerformIO $ newIORef Set.empty
 exportPleco :: String -> String -> IO ()
 exportPleco fileName topCategory = do
     picked <- getPicked
-
     withFile fileName AppendMode $ \h ->
-      forM_ (sortBy (comparing sortKey) picked) $
+      forM_ (sortBy (comparing exportSortKey) picked) $
         \(_v3Id, (Lesson{..}, RelevantLesson{..})) -> do
           hPutStrLn h $ "//" ++ topCategory ++ "/" ++ title ++ " (" ++ dumpStr level ++ ")"
           forM_ (rel ++ map fst irrel) $ hPutStrLn h . source
-  where
-    -- Sort by level, then by ID
-    sortKey :: (V3Id, (Lesson, RelevantLesson)) -> (Level, V3Id)
-    sortKey (v3id, (Lesson{..}, _)) = (level, v3id)
+
+exportMarkdown :: String -> String -> IO ()
+exportMarkdown fileName header = do
+    picked <- getPicked
+    withFile fileName AppendMode $ \h -> do
+      hPutStrLn h $ header
+      hPutStrLn h $ replicate (length header) '-'
+      forM_ (sortBy (comparing exportSortKey) picked) $
+        \(v3Id, (Lesson{..}, RelevantLesson{..})) -> do
+           content :: API.LessonContent <- decodeFile $ "content/" ++ v3IdString v3Id
+           let url = "https://chinesepod.com/lessons/" ++ API.lessonContentSlug content
+           hPutStrLn h $ "* [" ++ title ++ " (" ++ dumpStr level ++ ")](" ++ url ++ ")"
+
+-- Sort by level, then by ID
+exportSortKey :: (V3Id, (Lesson, RelevantLesson)) -> (Level, V3Id)
+exportSortKey (v3id, (Lesson{..}, _)) = (level, v3id)
 
 {-------------------------------------------------------------------------------
   Auxiliary
