@@ -448,11 +448,21 @@ searchVocab word = do
 
 -- | Number of relevant words in the vocabulary of the lesson
 countLessonRel :: LessonSummary -> Int
-countLessonRel LessonSummary{..} = length lessonSummaryRel
+countLessonRel LessonSummary{..} =
+    length lessonSummaryRel
+
+-- | Number of relevant and irrelevant words in the vocab of the lesson
+--
+-- We multiply the number of irrelevant words by -1, so that we sort them
+-- in the opposite direction.
+countLessonRelIrrel :: LessonSummary -> (Int, Int)
+countLessonRelIrrel LessonSummary{..} =
+    (length lessonSummaryRel, negate (length lessonSummaryIrrel))
 
 -- | Number of lessons that have this word in their key vocabulary
 countWordAppearsIn :: WordSummary -> Int
-countWordAppearsIn WordSummary{..} = length wordSummaryAppearsIn
+countWordAppearsIn WordSummary{..} =
+    length wordSummaryAppearsIn
 
 -- | Number of words in the irrelevant key vocabulary that are not in the
 -- specified HSK levels
@@ -462,7 +472,7 @@ countReallyIrrelevant ls LessonSummary{..} =
 
 -- | Summarize using default sorting
 summarize :: IO ()
-summarize = summarizeUsing countLessonRel countWordAppearsIn
+summarize = summarizeUsing countLessonRelIrrel countWordAppearsIn
 
 {-------------------------------------------------------------------------------
   Predicates on lessons
