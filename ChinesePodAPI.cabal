@@ -24,6 +24,7 @@ library
                        Servant.ChinesePod.HSK.Aux
                        Servant.ChinesePod.HSK.HSK2012
                        Servant.ChinesePod.Vocab
+                       Servant.ChinesePod.Vocab.Word
   other-modules:       Servant.ChinesePod.Util.Orphans.PrettyVal
   build-depends:         base >=4.8 && <4.9
                        , aeson
