@@ -25,7 +25,7 @@ import Data.Ord (comparing)
 import GHC.Generics (Generic)
 import System.IO.Unsafe (unsafePerformIO)
 import Text.Show.Pretty (PrettyVal, dumpStr)
-import qualified Data.Map as Map
+import qualified Data.Map as Map hiding ((!))
 import qualified Data.Set as Set
 
 import Servant.ChinesePod.Vocab
@@ -299,7 +299,7 @@ summarizeWord Word{..} = do
 
     return WordSummary {
         wordSummarySimpl     = source
-      , wordSummaryAppearsIn = analysisInverse Map.! source
+      , wordSummaryAppearsIn = analysisInverse `mapAt` source
       }
 
 getInFocusAvailable :: IO [(V3Id, (Lesson, RelevantLesson))]
@@ -308,7 +308,7 @@ getInFocusAvailable = do
     inFocus <- getFocus
 
     let pairLesson :: V3Id -> RelevantLesson -> (Lesson, RelevantLesson)
-        pairLesson lId relevant = (analysisAllLessons Map.! lId, relevant)
+        pairLesson lId relevant = (analysisAllLessons `mapAt` lId, relevant)
 
     return $ Map.toList
            $ Map.filter inFocus
@@ -320,7 +320,7 @@ getPicked = do
     (AnalysisStatic{analysisAllLessons}, AnalysisDynamic{analysisPicked}) <- readIORef globalAnalysisState
 
     let pairLesson :: V3Id -> RelevantLesson -> (Lesson, RelevantLesson)
-        pairLesson lId relevant = (analysisAllLessons Map.! lId, relevant)
+        pairLesson lId relevant = (analysisAllLessons `mapAt` lId, relevant)
 
     return $ mapWithKey pairLesson
            $ analysisPicked
@@ -365,7 +365,7 @@ infoLesson :: V3Id -> IO ()
 infoLesson lessonId = do
     (AnalysisStatic{..}, AnalysisDynamic{..}) <- readIORef globalAnalysisState
 
-    putStrLn . dumpStr $ analysisAllLessons Map.! lessonId
+    putStrLn . dumpStr $ analysisAllLessons `mapAt` lessonId
 
     forM_ (lookup lessonId analysisPicked) $ \relevantLesson -> do
       putStrLn "We picked this lesson:"
@@ -381,7 +381,7 @@ infoWord source = do
     (AnalysisStatic{analysisInverse}, _dyn) <- readIORef globalAnalysisState
 
     let appearsIn :: [V3Id]
-        appearsIn = analysisInverse Map.! source
+        appearsIn = analysisInverse `mapAt` source
 
     available <- mapM (uncurry summarizeLesson) =<< getInFocusAvailable
 
@@ -414,7 +414,7 @@ searchVocab word = do
               (relevant, comment) = case (mAlreadyPicked, mAvailable) of
                 (Just alreadyPicked, _) -> (alreadyPicked, "already picked")
                 (_, Just available)     -> (available, "available")
-                (_, _)                  -> (irrelevant lesson, "other")
+                (_, _)                  -> (irrelevantLesson lesson, "other")
           guard $ inFocus (lesson, relevant)
           return (v3id, lesson, relevant, comment)
 
@@ -436,11 +436,11 @@ searchVocab word = do
     showWithComment (summary, comment) = showLessonSummary True summary
                                       ++ " (" ++ comment ++ ")"
 
-    irrelevant :: Lesson -> RelevantLesson
-    irrelevant Lesson{..} = RelevantLesson{
-        rel   = []
-      , irrel = map withLevel (key ++ supDialog)
-      }
+irrelevantLesson :: Lesson -> RelevantLesson
+irrelevantLesson Lesson{..} = RelevantLesson{
+    rel   = []
+  , irrel = map withLevel (key ++ supDialog)
+  }
 
 {-------------------------------------------------------------------------------
   Different kinds of sorting functions
@@ -505,7 +505,7 @@ filterLessons p = updateAnalysisState aux
         }
       where
         p' :: V3Id -> RelevantLesson -> Bool
-        p' lessonId relevant = p (analysisAllLessons Map.! lessonId, relevant)
+        p' lessonId relevant = p (analysisAllLessons `mapAt` lessonId, relevant)
 
 -- | Pick a lesson
 pick :: V3Id -> IO ()
@@ -527,7 +527,9 @@ pick lessonId = updateAnalysisState aux
         inLesson Word{..} = source `Set.member` pickedLessonWords
 
         pickedLesson :: RelevantLesson
-        pickedLesson = analysisAvailable Map.! lessonId
+        pickedLesson = case Map.lookup lessonId analysisAvailable of
+          Just relevant -> relevant
+          Nothing       -> irrelevantLesson (analysisAllLessons `mapAt` lessonId)
 
         pickedLessonWords :: Set Simpl
         pickedLessonWords = simplSet $ rel pickedLesson
@@ -707,3 +709,8 @@ splits []     = [[]]
 splits [x]    = [[[x]]]
 splits (x:xs) = map (\(ys:yss) -> (x:ys):yss) (splits xs)
              ++ map ([x] :)                   (splits xs)
+
+mapAt :: (Ord k, Show k) => Map k a -> k -> a
+mapAt mp k = case Map.lookup k mp of
+               Just a  -> a
+               Nothing -> error $ "Unknown key " ++ show k
