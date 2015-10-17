@@ -389,6 +389,7 @@ infoWord source = do
     putStrLn $ "---------------------------------------------------------------"
     putStrLn $ intercalate "\n"
              $ map (showLessonSummary False)
+             $ sortBy (comparing countLessonRelIrrel)
              $ filter ((`elem` appearsIn) . lessonSummaryId)
              $ available
     putStrLn $ ""
@@ -429,7 +430,7 @@ searchVocab word = do
     putStrLn "-----------------------------------------------------------------"
     putStrLn $ intercalate "\n"
              $ map showWithComment
-             $ sortBy (comparing (countLessonRel . fst))
+             $ sortBy (comparing (countLessonRelIrrel . fst))
              $ summarized
   where
     showWithComment :: (LessonSummary, String) -> String
