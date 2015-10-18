@@ -723,6 +723,43 @@ exportSortKey :: (V3Id, (Lesson, RelevantLesson)) -> (Level, V3Id)
 exportSortKey (v3id, (Lesson{..}, _)) = (level, v3id)
 
 {-------------------------------------------------------------------------------
+  Statistics
+-------------------------------------------------------------------------------}
+
+-- | Simple statistics
+--
+-- The "harmless" words are not inclided in the irrelevant statistics here.
+data Stats = Stats {
+      statsNumPicked  :: Int
+    , statsNumRel     :: Int
+    , statsNumIrrel   :: Int
+    , statsRelVsIrrel :: Double
+    }
+  deriving (Generic)
+
+instance PrettyVal Stats
+
+printStats :: IO ()
+printStats = do
+    picked   <- getPicked
+    harmless <- getHarmless
+
+    let totalRel, totalIrrel :: Set Simpl
+        totalRel    = Set.fromList $ concatMap getRel   picked
+        totalIrrel' = concatMap getIrrel picked
+        totalIrrel  = Set.fromList $ filter (`notElem` harmless) totalIrrel'
+
+        statsNumPicked  = length picked
+        statsNumRel     = length totalRel
+        statsNumIrrel   = length totalIrrel
+        statsRelVsIrrel = (fromIntegral statsNumRel / fromIntegral (statsNumRel + statsNumIrrel)) * 100
+    putStrLn $ dumpStr Stats{..}
+  where
+    getRel, getIrrel :: (V3Id, (Lesson, RelevantLesson)) -> [Simpl]
+    getRel   (_, (_, RelevantLesson{..})) = map source rel
+    getIrrel (_, (_, RelevantLesson{..})) = map (source . fst) irrel
+
+{-------------------------------------------------------------------------------
   Auxiliary
 -------------------------------------------------------------------------------}
 
