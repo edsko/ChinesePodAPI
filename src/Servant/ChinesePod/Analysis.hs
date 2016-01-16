@@ -116,7 +116,7 @@ instance Binary RelevantLesson
 
 globalAnalysisState :: IORef AnalysisState
 {-# NOINLINE globalAnalysisState #-}
-globalAnalysisState = unsafePerformIO $ newIORef undefined
+globalAnalysisState = unsafePerformIO $ newIORef (error "state not loaded")
 
 updateAnalysisState :: (AnalysisStatic -> AnalysisDynamic -> AnalysisDynamic)
                     -> IO ()
@@ -642,11 +642,12 @@ hskSplits :: Simpl -> [(HSKLevel, Word)]
 hskSplits = nub . concatMap hskLevel . nub . concat . splits
 
 showHskSplits :: Simpl -> IO ()
-showHskSplits = putStrLn . dumpStr . hskSplits
+showHskSplits w = do
+    putStrLn $ "* HSK splits for " ++ w
+    putStrLn $ dumpStr (hskSplits w)
 
-searchHsk :: String -> IO ()
-searchHsk str = putStrLn . dumpStr
-              $ filter matches
+searchHsk :: String -> [(HSKLevel, Word)]
+searchHsk str = filter matches
               $ concat
               $ Map.elems hskIndex
   where
@@ -656,6 +657,9 @@ searchHsk str = putStrLn . dumpStr
       , str `isInfixOf` source
       , str `isInfixOf` target
       ]
+
+showSearchHsk :: String -> IO ()
+showSearchHsk = putStrLn . dumpStr . searchHsk
 
 {-------------------------------------------------------------------------------
   "Harmless" words are irrelevant words that don't really matter; for instance,
@@ -692,6 +696,38 @@ markHarmless w = modifyIORef globalHarmless $ Set.insert w
 globalHarmless :: IORef (Set Simpl)
 {-# NOINLINE globalHarmless #-}
 globalHarmless = unsafePerformIO $ newIORef Set.empty
+
+-- | Given a lesson, analyze which irrelevant words may be harmless
+--
+-- This can be applied to relevant still-available lessons as well as lessons
+-- we already picked (removing harmless irrelevant words from already picked
+-- lessons will improve the statistics).
+analyzeIrrelevant :: V3Id -> IO ()
+analyzeIrrelevant lessonId = do
+    (AnalysisStatic{..}, AnalysisDynamic{..}) <- readIORef globalAnalysisState
+    let lesson   = analysisAllLessons `mapAt` lessonId
+        relevant = case lookup lessonId analysisPicked of
+                     Just rl -> rl
+                     Nothing -> analysisAvailable  `mapAt` lessonId
+    summary <- summarizeLesson lessonId (lesson, relevant)
+    forM_ (lessonSummaryIrrel summary) $ \(word, levels) -> do
+      putStrLn $ "* " ++ source word ++ " " ++ show levels
+      let split     = hskSplits (source word)
+          covered   = concatMap (source . snd) split
+          uncovered = filter (`notElem` covered) (source word)
+      putStrLn $ "Splits: " ++ showMatches split
+      unless (null uncovered) $ do
+        putStrLn $ "Uncovered: "
+        forM_ uncovered $ \char -> do
+          let searched = searchHsk [char]
+          putStrLn $ [char] ++ ": " ++ showMatches searched
+      putStrLn ""
+  where
+    showMatches :: [(HSKLevel, Word)] -> String
+    showMatches = intercalate "," . map compact . sortBy (comparing fst)
+
+    compact :: (HSKLevel, Word) -> String
+    compact (level, word) = source word ++ "(" ++ show level ++ ")"
 
 {-------------------------------------------------------------------------------
   Export
