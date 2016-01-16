@@ -1,10 +1,13 @@
+{-# LANGUAGE OverloadedStrings #-}
 module Main (main) where
 
 import Data.Binary
 import System.Directory
+import Servant.Client (ServantError(..))
 import Text.Show.Pretty
 import Text.Printf (printf)
-import qualified Data.Map as Map
+import qualified Data.Map             as Map
+import qualified Data.ByteString.Lazy as BS.L
 
 import Servant.ChinesePod.API
 import Servant.ChinesePod.Client
@@ -121,7 +124,7 @@ withCPod :: OptionsCPod
 withCPod OptionsCPod{..} handler = do
     mRes <- runEitherT runHandler
     case mRes of
-      Left  err -> print err
+      Left  err -> logServantError err
       Right ()  -> return ()
   where
     runHandler :: EitherT ServantError IO ()
@@ -132,6 +135,29 @@ withCPod OptionsCPod{..} handler = do
         return ()
 
     cpodAPI@ChinesePodAPI{..} = chinesePodAPI optionsBaseUrl
+
+logServantError :: ServantError -> IO ()
+logServantError err = do
+    let (err', mBody) = body err
+    case mBody of
+      Nothing -> return ()
+      Just bs -> BS.L.writeFile "responseBody.servant" bs
+    print err'
+  where
+    body :: ServantError -> (ServantError, Maybe BS.L.ByteString)
+    body FailureResponse{..} =
+      (FailureResponse{responseBody = omitted, ..}, Just responseBody)
+    body DecodeFailure{..} =
+      (DecodeFailure{responseBody = omitted, ..}, Just responseBody)
+    body UnsupportedContentType{..} =
+      (UnsupportedContentType{responseBody = omitted, ..}, Just responseBody)
+    body ConnectionError{..} =
+      (ConnectionError{..}, Nothing)
+    body InvalidContentTypeHeader{..} =
+      (InvalidContentTypeHeader{responseBody = omitted, ..}, Just responseBody)
+
+    omitted :: BS.L.ByteString
+    omitted = "<<written to responseBody.servant>>"
 
 main :: IO ()
 main = do

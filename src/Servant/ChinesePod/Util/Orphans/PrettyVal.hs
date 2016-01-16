@@ -11,14 +11,6 @@ import qualified Data.Aeson.Encode.Pretty  as Aeson.Pretty
 import qualified Data.ByteString.Lazy.UTF8 as BS.L.UTF8
 
 {-------------------------------------------------------------------------------
-  Base
--------------------------------------------------------------------------------}
-
-instance PrettyVal Bool
-
-instance PrettyVal a => PrettyVal (Maybe a)
-
-{-------------------------------------------------------------------------------
   Containers
 -------------------------------------------------------------------------------}
 

@@ -27,7 +27,8 @@ library
                        Servant.ChinesePod.Vocab.Word
   other-modules:       Servant.ChinesePod.Util.Orphans.PrettyVal
   build-depends:         base >=4.8 && <4.9
-                       , aeson
+                         -- we assume the behaviour of aeson 0.10 for Maybe
+                       , aeson == 0.10.*
                        , aeson-pretty
                        , binary
                        , bytestring
@@ -35,7 +36,8 @@ library
                        , cryptohash
                        , either
                        , network-uri
-                       , pretty-show
+                         -- 1.6.9 introduces some new PrettyVal instances
+                       , pretty-show >= 1.6.9
                        , servant
                        , servant-client
                        , template-haskell
@@ -67,16 +69,19 @@ executable cpod-query
   build-depends:         base
                        , ChinesePodAPI
                        , binary
+                       , bytestring
                        , containers
                        , directory
                        , network-uri
                        , optparse-applicative
                        , pretty-show
                        , servant
+                       , servant-client
                        , text
   hs-source-dirs:      src-main
   default-language:    Haskell2010
   default-extensions:  RecordWildCards
                        ScopedTypeVariables
                        MultiParamTypeClasses
+  other-extensions:    OverloadedStrings
   ghc-options:         -Wall
