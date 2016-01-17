@@ -35,9 +35,11 @@ library
                        , containers
                        , cryptohash
                        , either
+                       , filepath
                        , network-uri
                          -- 1.6.9 introduces some new PrettyVal instances
                        , pretty-show >= 1.6.9
+                       , process
                        , servant
                        , servant-client
                        , template-haskell

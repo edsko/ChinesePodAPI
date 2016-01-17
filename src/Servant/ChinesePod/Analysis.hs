@@ -25,7 +25,10 @@ import Data.Ord (comparing)
 import GHC.Generics (Generic)
 import System.IO
 import System.IO.Unsafe (unsafePerformIO)
+import System.FilePath ((</>))
+import System.Process (callProcess)
 import Text.Show.Pretty (PrettyVal, dumpStr)
+import Text.Printf (printf)
 import qualified Data.Map as Map hiding ((!))
 import qualified Data.Set as Set
 
@@ -784,6 +787,24 @@ exportMarkdown fileName header = do
            content :: API.LessonContent <- decodeFile $ "content/" ++ v3IdString v3Id
            let url = "https://chinesepod.com/lessons/" ++ API.lessonContentSlug content
            hPutStrLn h $ "* [" ++ title ++ " (" ++ dumpStr level ++ ")](" ++ url ++ ")"
+
+downloadAudio :: FilePath -> IO ()
+downloadAudio fp = do
+    picked <- getPickedInfo
+    forM_ (zip [1..] (sortBy (comparing exportSortKey) picked)) $
+      \(i, LessonInfo{lessonId = v3Id, lesson = Lesson{..}, relevant = RelevantLesson{..}}) -> do
+         content :: API.LessonContent <- decodeFile $ "content/" ++ v3IdString v3Id
+         let slug = API.lessonContentSlug content
+             Just mp3FullLesson = API.lessonContentCdQualityMp3 content
+             pref = printf "%03d" (i :: Int) ++ "-"
+             file = pref ++ slug ++ ".mp3"
+
+         callProcess "curl" [mp3FullLesson, "-o", fp </> "lesson" </> file]
+
+         case API.lessonContentDialogueMp3  content of
+           Nothing -> return () -- QW don't have dialogues
+           Just mp3Dialogue ->
+             callProcess "curl" [mp3Dialogue, "-o", fp </> "dialogue" </> file]
 
 -- Sort by level, then by ID
 exportSortKey :: LessonInfo -> (Level, V3Id)
