@@ -444,7 +444,7 @@ searchVocab word = do
       summary <- summarizeLesson lessonInfo
       return (summary, comment)
 
-    putStrLn "This word appears in the following in-focus lessons:"
+    putStrLn $ word ++ " appears in the following in-focus lessons:"
     putStrLn "-----------------------------------------------------------------"
     putStrLn $ intercalate "\n"
              $ map showWithComment
