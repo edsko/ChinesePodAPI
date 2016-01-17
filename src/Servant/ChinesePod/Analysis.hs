@@ -218,6 +218,37 @@ open :: FilePath -> IO ()
 open fp = writeIORef globalAnalysisState =<< decodeFile fp
 
 {-------------------------------------------------------------------------------
+  All available information about a lesson
+-------------------------------------------------------------------------------}
+
+data LessonInfo = LessonInfo {
+    lessonId :: V3Id
+  , lesson   :: Lesson
+  , relevant :: RelevantLesson
+  }
+
+infoFromRelevant :: V3Id -> RelevantLesson -> IO LessonInfo
+infoFromRelevant lessonId relevant = do
+    (AnalysisStatic{analysisAllLessons}, _) <- readIORef globalAnalysisState
+    return LessonInfo {
+        lessonId = lessonId
+      , lesson   = analysisAllLessons `mapAt` lessonId
+      , relevant = relevant
+      }
+
+-- | Get LessonInfo for all available lessons
+getAvailableInfo :: IO [LessonInfo]
+getAvailableInfo = do
+    (_, AnalysisDynamic{analysisAvailable}) <- readIORef globalAnalysisState
+    mapM (uncurry infoFromRelevant) (Map.toList analysisAvailable)
+
+-- | Get LessonInfo for currently picked lessons
+getPickedInfo :: IO [LessonInfo]
+getPickedInfo = do
+    (_, AnalysisDynamic{analysisPicked}) <- readIORef globalAnalysisState
+    mapM (uncurry infoFromRelevant) analysisPicked
+
+{-------------------------------------------------------------------------------
   Query the state
 -------------------------------------------------------------------------------}
 
@@ -277,8 +308,11 @@ showWordSummary WordSummary{..} = concat [
     , ")"
     ]
 
-summarizeLesson :: V3Id -> (Lesson, RelevantLesson) -> IO LessonSummary
-summarizeLesson lessonId (Lesson{..}, RelevantLesson{..}) = do
+summarizeLesson :: LessonInfo -> IO LessonSummary
+summarizeLesson LessonInfo{ lessonId
+                          , lesson   = Lesson{..}
+                          , relevant = RelevantLesson{..}
+                          } = do
     allHarmless <- getHarmless
 
     let isHarmless :: Word -> Bool
@@ -304,28 +338,10 @@ summarizeWord Word{..} = do
       , wordSummaryAppearsIn = analysisInverse `mapAt` source
       }
 
-getInFocusAvailable :: IO [(V3Id, (Lesson, RelevantLesson))]
+getInFocusAvailable :: IO [LessonInfo]
 getInFocusAvailable = do
-    (AnalysisStatic{analysisAllLessons}, AnalysisDynamic{analysisAvailable}) <- readIORef globalAnalysisState
     inFocus <- getFocus
-
-    let pairLesson :: V3Id -> RelevantLesson -> (Lesson, RelevantLesson)
-        pairLesson lId relevant = (analysisAllLessons `mapAt` lId, relevant)
-
-    return $ Map.toList
-           $ Map.filter inFocus
-           $ Map.mapWithKey pairLesson
-           $ analysisAvailable
-
-getPicked :: IO [(V3Id, (Lesson, RelevantLesson))]
-getPicked = do
-    (AnalysisStatic{analysisAllLessons}, AnalysisDynamic{analysisPicked}) <- readIORef globalAnalysisState
-
-    let pairLesson :: V3Id -> RelevantLesson -> (Lesson, RelevantLesson)
-        pairLesson lId relevant = (analysisAllLessons `mapAt` lId, relevant)
-
-    return $ mapWithKey pairLesson
-           $ analysisPicked
+    filter inFocus <$> getAvailableInfo
 
 -- | Show a readable summary of what's left to do
 summarizeUsing :: (Ord a, Ord b) =>
@@ -335,8 +351,8 @@ summarizeUsing :: (Ord a, Ord b) =>
 summarizeUsing lessonKey wordKey = do
     (_static, AnalysisDynamic{analysisTodo}) <- readIORef globalAnalysisState
 
-    available <- mapM (uncurry summarizeLesson) =<< getInFocusAvailable
-    picked    <- mapM (uncurry summarizeLesson) =<< getPicked
+    available <- mapM summarizeLesson =<< getInFocusAvailable
+    picked    <- mapM summarizeLesson =<< getPickedInfo
     todo      <- mapM summarizeWord analysisTodo
     zoomedIn  <- isZoomedIn
 
@@ -385,7 +401,7 @@ infoWord source = do
     let appearsIn :: [V3Id]
         appearsIn = analysisInverse `mapAt` source
 
-    available <- mapM (uncurry summarizeLesson) =<< getInFocusAvailable
+    available <- mapM summarizeLesson =<< getInFocusAvailable
 
     putStrLn "This word is in the vocab of the following available lessons:"
     putStrLn $ "---------------------------------------------------------------"
@@ -408,8 +424,7 @@ searchVocab word = do
     (AnalysisStatic{..}, AnalysisDynamic{..}) <- readIORef globalAnalysisState
     inFocus <- getFocus
 
-    let isMatching :: (V3Id, Lesson)
-                   -> Maybe (V3Id, Lesson, RelevantLesson, String)
+    let isMatching :: (V3Id, Lesson) -> Maybe (LessonInfo, String)
         isMatching (v3id, lesson) = do
           guard $ any (\word' -> word `isInfixOf` source word') (key lesson ++ supDialog lesson)
           let mAlreadyPicked      = lookup v3id analysisPicked
@@ -418,14 +433,15 @@ searchVocab word = do
                 (Just alreadyPicked, _) -> (alreadyPicked, "already picked")
                 (_, Just available)     -> (available, "available")
                 (_, _)                  -> (irrelevantLesson lesson, "other")
-          guard $ inFocus (lesson, relevant)
-          return (v3id, lesson, relevant, comment)
+              lessonInfo          = LessonInfo v3id lesson relevant
+          guard $ inFocus lessonInfo
+          return (lessonInfo, comment)
 
-    let matchingLessons :: [(V3Id, Lesson, RelevantLesson, String)]
+    let matchingLessons :: [(LessonInfo, String)]
         matchingLessons = mapMaybe isMatching (Map.toList analysisAllLessons)
 
-    summarized <- forM matchingLessons $ \(v3id, lesson, relevant, comment) -> do
-      summary <- summarizeLesson v3id (lesson, relevant)
+    summarized <- forM matchingLessons $ \(lessonInfo, comment) -> do
+      summary <- summarizeLesson lessonInfo
       return (summary, comment)
 
     putStrLn "This word appears in the following in-focus lessons:"
@@ -481,18 +497,21 @@ summarize = summarizeUsing countLessonRelIrrel countWordAppearsIn
   Predicates on lessons
 -------------------------------------------------------------------------------}
 
-type LessonPredicate = (Lesson, RelevantLesson) -> Bool
+type LessonPredicate = LessonInfo -> Bool
 
 atLevel :: [Level] -> LessonPredicate
-atLevel ls (Lesson{..}, _) = level `elem` ls
+atLevel ls LessonInfo{lesson = Lesson{..}} =
+    level `elem` ls
 
 -- | Only allow irrelevant words from the specified HSK levels
 irrelInHSK :: [HSKLevel] -> LessonPredicate
-irrelInHSK ls (_, RelevantLesson{..}) = all (any (`elem` ls) . snd) irrel
+irrelInHSK ls LessonInfo{relevant = RelevantLesson{..}} =
+    all (any (`elem` ls) . snd) irrel
 
 -- | Maximum number of irrelevant words
 maxNumIrrel :: Int -> LessonPredicate
-maxNumIrrel n (_, RelevantLesson{..}) = length irrel <= n
+maxNumIrrel n LessonInfo{relevant = RelevantLesson{..}} =
+    length irrel <= n
 
 {-------------------------------------------------------------------------------
   Operations on the dynamic state
@@ -508,7 +527,18 @@ filterLessons p = updateAnalysisState aux
         }
       where
         p' :: V3Id -> RelevantLesson -> Bool
-        p' lessonId relevant = p (analysisAllLessons `mapAt` lessonId, relevant)
+        p' lessonId relevant = p LessonInfo{
+            lessonId = lessonId
+          , lesson   = analysisAllLessons `mapAt` lessonId
+          , relevant = relevant
+          }
+
+-- | Remove a lesson from the available set
+dropLesson :: V3Id -> IO ()
+dropLesson lessonId' = filterLessons notSpecifiedLesson
+  where
+    notSpecifiedLesson :: LessonPredicate
+    notSpecifiedLesson LessonInfo{lessonId} = lessonId /= lessonId'
 
 -- | Pick a lesson
 pick :: V3Id -> IO ()
@@ -705,11 +735,12 @@ globalHarmless = unsafePerformIO $ newIORef Set.empty
 analyzeIrrelevant :: V3Id -> IO ()
 analyzeIrrelevant lessonId = do
     (AnalysisStatic{..}, AnalysisDynamic{..}) <- readIORef globalAnalysisState
-    let lesson   = analysisAllLessons `mapAt` lessonId
-        relevant = case lookup lessonId analysisPicked of
-                     Just rl -> rl
-                     Nothing -> analysisAvailable  `mapAt` lessonId
-    summary <- summarizeLesson lessonId (lesson, relevant)
+    let lesson     = analysisAllLessons `mapAt` lessonId
+        relevant   = case lookup lessonId analysisPicked of
+                       Just rl -> rl
+                       Nothing -> analysisAvailable  `mapAt` lessonId
+        lessonInfo = LessonInfo lessonId lesson relevant
+    summary <- summarizeLesson lessonInfo
     forM_ (lessonSummaryIrrel summary) $ \(word, levels) -> do
       putStrLn $ "* " ++ source word ++ " " ++ show levels
       let split     = hskSplits (source word)
@@ -735,28 +766,28 @@ analyzeIrrelevant lessonId = do
 
 exportPleco :: String -> String -> IO ()
 exportPleco fileName topCategory = do
-    picked <- getPicked
+    picked <- getPickedInfo
     withFile fileName AppendMode $ \h ->
       forM_ (sortBy (comparing exportSortKey) picked) $
-        \(_v3Id, (Lesson{..}, RelevantLesson{..})) -> do
+        \LessonInfo{lessonId = _v3Id, lesson = Lesson{..}, relevant = RelevantLesson{..}} -> do
           hPutStrLn h $ "//" ++ topCategory ++ "/" ++ title ++ " (" ++ dumpStr level ++ ")"
           forM_ (rel ++ map fst irrel) $ hPutStrLn h . source
 
 exportMarkdown :: String -> String -> IO ()
 exportMarkdown fileName header = do
-    picked <- getPicked
+    picked <- getPickedInfo
     withFile fileName AppendMode $ \h -> do
       hPutStrLn h $ header
       hPutStrLn h $ replicate (length header) '-'
       forM_ (sortBy (comparing exportSortKey) picked) $
-        \(v3Id, (Lesson{..}, RelevantLesson{..})) -> do
+        \LessonInfo{lessonId = v3Id, lesson = Lesson{..}, relevant = RelevantLesson{..}} -> do
            content :: API.LessonContent <- decodeFile $ "content/" ++ v3IdString v3Id
            let url = "https://chinesepod.com/lessons/" ++ API.lessonContentSlug content
            hPutStrLn h $ "* [" ++ title ++ " (" ++ dumpStr level ++ ")](" ++ url ++ ")"
 
 -- Sort by level, then by ID
-exportSortKey :: (V3Id, (Lesson, RelevantLesson)) -> (Level, V3Id)
-exportSortKey (v3id, (Lesson{..}, _)) = (level, v3id)
+exportSortKey :: LessonInfo -> (Level, V3Id)
+exportSortKey LessonInfo{lessonId = v3id, lesson = Lesson{..}} = (level, v3id)
 
 {-------------------------------------------------------------------------------
   Statistics
@@ -777,11 +808,11 @@ instance PrettyVal Stats
 
 printStats :: IO ()
 printStats = do
-    picked   <- getPicked
+    picked   <- getPickedInfo
     harmless <- getHarmless
 
     let totalRel, totalIrrel :: Set Simpl
-        totalRel    = Set.fromList $ concatMap getRel   picked
+        totalRel    = Set.fromList $ concatMap getRel picked
         totalIrrel' = concatMap getIrrel picked
         totalIrrel  = Set.fromList $ filter (`notElem` harmless) totalIrrel'
 
@@ -791,9 +822,9 @@ printStats = do
         statsRelVsIrrel = (fromIntegral statsNumRel / fromIntegral (statsNumRel + statsNumIrrel)) * 100
     putStrLn $ dumpStr Stats{..}
   where
-    getRel, getIrrel :: (V3Id, (Lesson, RelevantLesson)) -> [Simpl]
-    getRel   (_, (_, RelevantLesson{..})) = map source rel
-    getIrrel (_, (_, RelevantLesson{..})) = map (source . fst) irrel
+    getRel, getIrrel :: LessonInfo -> [Simpl]
+    getRel   LessonInfo{relevant = RelevantLesson{..}} = map source rel
+    getIrrel LessonInfo{relevant = RelevantLesson{..}} = map (source . fst) irrel
 
 {-------------------------------------------------------------------------------
   Auxiliary
