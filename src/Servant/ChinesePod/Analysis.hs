@@ -23,6 +23,7 @@ import Data.Set (Set)
 import Data.Maybe (mapMaybe)
 import Data.Ord (comparing)
 import GHC.Generics (Generic)
+import System.Directory (doesFileExist)
 import System.IO
 import System.IO.Unsafe (unsafePerformIO)
 import System.FilePath ((</>))
@@ -789,22 +790,35 @@ exportMarkdown fileName header = do
            hPutStrLn h $ "* [" ++ title ++ " (" ++ dumpStr level ++ ")](" ++ url ++ ")"
 
 downloadAudio :: FilePath -> IO ()
-downloadAudio fp = do
+downloadAudio dest = do
     picked <- getPickedInfo
     forM_ (zip [1..] (sortBy (comparing exportSortKey) picked)) $
       \(i, LessonInfo{lessonId = v3Id, lesson = Lesson{..}, relevant = RelevantLesson{..}}) -> do
          content :: API.LessonContent <- decodeFile $ "content/" ++ v3IdString v3Id
-         let slug = API.lessonContentSlug content
+         let slug               = API.lessonContentSlug content
              Just mp3FullLesson = API.lessonContentCdQualityMp3 content
-             pref = printf "%03d" (i :: Int) ++ "-"
-             file = pref ++ slug ++ ".mp3"
+             pref               = printf "%03d" (i :: Int) ++ "-"
+             filename           = pref ++ slug ++ ".mp3"
+             pathLesson         = dest </> "lesson"   </> filename
+             pathDialogue       = dest </> "dialogue" </> filename
 
-         callProcess "curl" [mp3FullLesson, "-o", fp </> "lesson" </> file]
+         unlessFileExists pathLesson $
+           callProcess "curl" [mp3FullLesson, "-o", pathLesson]
 
          case API.lessonContentDialogueMp3  content of
-           Nothing -> return () -- QW don't have dialogues
-           Just mp3Dialogue ->
-             callProcess "curl" [mp3Dialogue, "-o", fp </> "dialogue" </> file]
+           Nothing ->
+             return () -- QW don't have dialogues
+           Just mp3Dialogue -> unlessFileExists pathDialogue $
+             callProcess "curl" [mp3Dialogue, "-o", pathDialogue]
+
+
+  where
+    -- Technically, this has a race condition, but who cares
+    unlessFileExists :: FilePath -> IO () -> IO ()
+    unlessFileExists fp act = do
+      exists <- doesFileExist fp
+      if exists then putStrLn $ "Skipping " ++ fp
+                else act
 
 -- Sort by level, then by ID
 exportSortKey :: LessonInfo -> (Level, V3Id)

@@ -34,6 +34,7 @@ library
                        , bytestring
                        , containers
                        , cryptohash
+                       , directory
                        , either
                        , filepath
                        , network-uri
