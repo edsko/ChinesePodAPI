@@ -517,6 +517,10 @@ maxNumIrrel :: Int -> LessonPredicate
 maxNumIrrel n LessonInfo{relevant = RelevantLesson{..}} =
     length irrel <= n
 
+onlyLessons :: [V3Id] -> LessonPredicate
+onlyLessons lessonIds LessonInfo{lessonId = lessonId} =
+    lessonId `elem` lessonIds
+
 {-------------------------------------------------------------------------------
   Operations on the dynamic state
 -------------------------------------------------------------------------------}
@@ -769,8 +773,11 @@ analyzeIrrelevant lessonId = do
 -------------------------------------------------------------------------------}
 
 exportPleco :: String -> String -> IO ()
-exportPleco fileName topCategory = do
-    picked <- getPickedInfo
+exportPleco = exportPleco' (const True)
+
+exportPleco' :: LessonPredicate -> String -> String -> IO ()
+exportPleco' p fileName topCategory = do
+    picked <- filter p <$> getPickedInfo
     withFile fileName AppendMode $ \h ->
       forM_ (sortBy (comparing exportSortKey) picked) $
         \LessonInfo{lessonId = _v3Id, lesson = Lesson{..}, relevant = RelevantLesson{..}} -> do
@@ -778,8 +785,11 @@ exportPleco fileName topCategory = do
           forM_ (rel ++ map fst irrel) $ hPutStrLn h . source
 
 exportMarkdown :: String -> String -> IO ()
-exportMarkdown fileName header = do
-    picked <- getPickedInfo
+exportMarkdown = exportMarkdown' (const True)
+
+exportMarkdown' :: LessonPredicate -> String -> String -> IO ()
+exportMarkdown' p fileName header = do
+    picked <- filter p <$> getPickedInfo
     withFile fileName AppendMode $ \h -> do
       hPutStrLn h $ header
       hPutStrLn h $ replicate (length header) '-'
@@ -790,8 +800,11 @@ exportMarkdown fileName header = do
            hPutStrLn h $ "* [" ++ title ++ " (" ++ dumpStr level ++ ")](" ++ url ++ ")"
 
 downloadAudio :: FilePath -> IO ()
-downloadAudio dest = do
-    picked <- getPickedInfo
+downloadAudio = downloadAudio' (const True)
+
+downloadAudio' :: LessonPredicate -> FilePath -> IO ()
+downloadAudio' p dest = do
+    picked <- filter p <$> getPickedInfo
     forM_ (zip [1..] (sortBy (comparing exportSortKey) picked)) $
       \(i, LessonInfo{lessonId = v3Id, lesson = Lesson{..}, relevant = RelevantLesson{..}}) -> do
          content :: API.LessonContent <- decodeFile $ "content/" ++ v3IdString v3Id
@@ -842,8 +855,11 @@ data Stats = Stats {
 instance PrettyVal Stats
 
 printStats :: IO ()
-printStats = do
-    picked   <- getPickedInfo
+printStats = printStats' (const True)
+
+printStats' :: LessonPredicate -> IO ()
+printStats' p = do
+    picked   <- filter p <$> getPickedInfo
     harmless <- getHarmless
 
     let totalRel, totalIrrel :: Set Simpl
