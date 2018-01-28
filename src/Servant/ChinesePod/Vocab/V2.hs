@@ -35,8 +35,8 @@ data Lesson = Lesson {
       title   :: String
     , level   :: Level
     , hosts   :: String
-    , key     :: [Word]
     , isVideo :: Bool
+    , key     :: [Word]
 
       -- | Supplemental vocabulary that appears somewhere in the dialogue
     , supDialog :: [Word]
