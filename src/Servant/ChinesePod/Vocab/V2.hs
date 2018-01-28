@@ -17,7 +17,6 @@ import Data.Binary (Binary, decodeFile)
 import Data.Data (Data)
 import Data.Either (partitionEithers)
 import Data.Map (Map)
-import Data.Maybe (fromMaybe)
 import Data.List (partition, isInfixOf)
 import Data.Text (Text)
 import GHC.Generics
@@ -27,7 +26,10 @@ import qualified Data.Text as T
 
 import Servant.ChinesePod.API (V3Id(..))
 import Servant.ChinesePod.Vocab.Word
-import qualified Servant.ChinesePod.API as API
+import Servant.ChinesePod.Util.Migrate
+import Servant.ChinesePod.Vocab.V1 (Level(..))
+import qualified Servant.ChinesePod.API      as API
+import qualified Servant.ChinesePod.Vocab.V1 as V1
 
 data Lesson = Lesson {
       title   :: String
@@ -44,27 +46,16 @@ data Lesson = Lesson {
     }
   deriving (Generic, Data, Show)
 
-data Level =
-    Newbie
-  | Elementary
-  | Intermediate
-  | UpperIntermediate
-  | Advanced
-  | Media
-  deriving (Generic, Data, Eq, Ord, Show)
-
 data Vocab = Vocab {
       vocab :: Map V3Id Lesson
     }
   deriving (Generic, Data, Show)
 
 instance Binary Lesson
-instance Binary Level
 instance Binary Vocab
 
 instance PrettyVal Lesson
 instance PrettyVal Vocab
-instance PrettyVal Level
 
 {-------------------------------------------------------------------------------
   Constructing from full lesson content
@@ -96,7 +87,7 @@ extractLesson :: API.LessonContent -> Either Text Lesson
 extractLesson API.LessonContent{..} = do
     let title   = lessonContentTitle
         hosts   = lessonContentHosts
-        isVideo = fromMaybe False lessonContentVideoLesson
+        isVideo = lessonContentVideoLesson == Just True
     level      <- extractLevel lessonContentLevel
     vocabulary <- maybeToEither "Lacks lacks vocabulary" lessonContentVocabulary
     let key = map extractWord $ API.vocabularyKeyVocab vocabulary
@@ -163,3 +154,25 @@ inSentence word API.Sentence{..} = source word `isInfixOf` sentenceSource
 
 loadVocab :: FilePath -> IO Vocab
 loadVocab = decodeFile
+
+{-------------------------------------------------------------------------------
+  Migration
+-------------------------------------------------------------------------------}
+
+instance Migrate Vocab where
+  type MigrateFrom Vocab = V1.Vocab
+
+  migrate V1.Vocab{..} = Vocab (fmap migrate vocab)
+
+instance Migrate Lesson where
+  type MigrateFrom Lesson = V1.Lesson
+
+  migrate V1.Lesson{..} = Lesson{
+        title     = title
+      , level     = level
+      , hosts     = hosts
+      , key       = key
+      , isVideo   = False -- we used to filter all these out
+      , supDialog = supDialog
+      , supExtra  = supExtra
+      }

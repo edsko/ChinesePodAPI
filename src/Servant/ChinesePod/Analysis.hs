@@ -2,12 +2,10 @@
 --
 -- This module is intended for use in @ghci@.
 module Servant.ChinesePod.Analysis (
-  --   initState
-  -- , globalAnalysisState
-  -- , getStats
     -- TODO: export list
     module Servant.ChinesePod.Analysis
     -- Re-exports
+  , module State
   , module Vocab
   , module HSK
   , module Data.IORef
@@ -15,7 +13,7 @@ module Servant.ChinesePod.Analysis (
 
 import Prelude hiding (Word, words)
 import Control.Monad
-import Data.Binary (Binary, encodeFile, decodeFile)
+import Data.Binary (encodeFile, decodeFile)
 import Data.IORef
 import Data.List (intercalate, sortBy, partition, nub, isInfixOf)
 import Data.Map (Map)
@@ -33,90 +31,16 @@ import Text.Printf (printf)
 import qualified Data.Map as Map hiding ((!))
 import qualified Data.Set as Set
 
-import Servant.ChinesePod.Vocab.V1      as Vocab
-import Servant.ChinesePod.HSK.HSK2012   as HSK
-import qualified Servant.ChinesePod.API as API
+import Servant.ChinesePod.Analysis.State.V2           as State
+import Servant.ChinesePod.HSK.HSK2012                 as HSK
+import Servant.ChinesePod.Vocab.V2                    as Vocab
+import qualified Servant.ChinesePod.API               as API
+import qualified Servant.ChinesePod.Analysis.State.V1 as V1
+import qualified Servant.ChinesePod.Analysis.State.V2 as V2
 
 {-------------------------------------------------------------------------------
-  State
+  Global state
 -------------------------------------------------------------------------------}
-
--- | Word in simplified characters
-type Simpl = String
-
--- | The static part of the analysis (that doesn't change over time)
-data AnalysisStatic = AnalysisStatic {
-      -- | All lessons available
-      analysisAllLessons :: Map V3Id Lesson
-
-      -- | All words we're studying
-    , analysisAllWords :: [Word]
-
-      -- | "Inverse" index: which lessons cover a certain word?
-      --
-      -- We do not distinguish between key and supplemental vocabulary here,
-      -- but only consider supplemental vocabulary that appears in the dialog.
-      -- See comments for `RelevantLesson`.
-    , analysisInverse :: Map Simpl [V3Id]
-    }
-  deriving (Generic, Show)
-
--- | The dynamic part of the analysis: words we've covered, lesosns we picked
-data AnalysisDynamic = AnalysisDynamic {
-      -- | Words we have left to chose lessons for
-      analysisTodo :: [Word]
-
-      -- | Lessons we've already chosen
-      --
-      -- Note that the concept of 'relevancy' is stateful: as we pick lessons
-      -- and cover more words, fewer and fewer words are "relevant" (still to
-      -- be covered). The relevancy information we record in 'analyisPicked'
-      -- reflects this statefulness: we record the lessons in the order we
-      -- choose them, and record the relevancy _at the time of choosing_.
-    , analysisPicked :: [(V3Id, RelevantLesson)]
-
-      -- | Lessons still available (that are relevant to 'analysisTodo')
-      --
-      -- This set will shrink as we remove words from 'analysisTodo'.
-      -- We may also remove lessons from 'analysisAvailable' because they
-      -- were explicitly filtered out (so we cannot reconstruct this from
-      -- the other data).
-    , analysisAvailable :: Map V3Id RelevantLesson
-    }
-  deriving (Generic, Show)
-
-type AnalysisState = (AnalysisStatic, AnalysisDynamic)
-
--- | Lesson relevant to the set of words we are studying
---
--- A lesson is "relevant" if
---
--- > not (null rel)
---
--- We do not distinguish between key and supplemental vocabulary here; it is
--- too difficult to cover the HSK levels using only key vocabulary. However,
--- we consider _only_ the supplemental vocabulary that actually appears in the
--- dialogue. Vocabulary that does not appear in the dialogue does not help with
--- studying for the HSK, but does not harm either. Hence, we just ignore it.
-data RelevantLesson = RelevantLesson {
-      -- | Relevant vocabulary
-      rel :: [Word]
-
-      -- | Irrelevant vocabulary
-      --
-      -- We also record the HSK levels they appear in. This is useful for
-      -- filtering/zooming.
-    , irrel :: [(Word, [HSKLevel])]
-    }
-  deriving (Generic, Show)
-
-instance PrettyVal AnalysisStatic
-instance PrettyVal AnalysisDynamic
-instance PrettyVal RelevantLesson
-
-instance Binary AnalysisStatic
-instance Binary AnalysisDynamic
-instance Binary RelevantLesson
 
 globalAnalysisState :: IORef AnalysisState
 {-# NOINLINE globalAnalysisState #-}
@@ -137,6 +61,16 @@ initState vocabFile words = do
     let static  = analysisStatic vocab words
         dynamic = analysisDynamic static
     writeIORef globalAnalysisState (static, dynamic)
+
+-- | Reset the list of available lessons
+--
+-- Useful when we downloaded new lessons.
+-- NOTE: This /only/ updates the static part of the state.
+resetVocab :: FilePath -> IO ()
+resetVocab vocabFile = do
+    vocab <- loadVocab vocabFile
+    modifyIORef globalAnalysisState $ \(static, dynamic) ->
+      (analysisStatic vocab (analysisAllWords static), dynamic)
 
 analysisStatic :: Vocab -> [Word] -> AnalysisStatic
 analysisStatic (Vocab vocab) words = AnalysisStatic {
@@ -220,6 +154,13 @@ save fp = encodeFile fp =<< readIORef globalAnalysisState
 
 open :: FilePath -> IO ()
 open fp = writeIORef globalAnalysisState =<< decodeFile fp
+
+-- | Migration
+openV1 :: FilePath -> IO ()
+openV1 fp = writeIORef globalAnalysisState =<< (v1_to_v2 <$> decodeFile fp)
+  where
+    v1_to_v2 :: V1.AnalysisState -> V2.AnalysisState
+    v1_to_v2 = migrate
 
 {-------------------------------------------------------------------------------
   All available information about a lesson
@@ -647,8 +588,6 @@ globalFocus = unsafePerformIO $ newIORef FocusAll
 {-------------------------------------------------------------------------------
   HSK level for each word
 -------------------------------------------------------------------------------}
-
-type HSKLevel = Int
 
 hskLevel :: Simpl -> [(HSKLevel, Word)]
 hskLevel simpl = Map.findWithDefault [] simpl hskIndex
