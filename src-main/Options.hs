@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 module Options (
     Command(..)
   , Options(..)
@@ -8,14 +9,15 @@ module Options (
   , FromLogin(..)
   ) where
 
+import Control.Monad.Catch
 import Data.Typeable
 import Options.Applicative
-import Network.URI
 import qualified Data.Text as T
 
 import Servant.API
 import Servant.ChinesePod.API
 import Servant.ChinesePod.Client
+import qualified Servant.Client as Servant
 
 data Options = Options {
       optionsCommand  :: Command
@@ -222,43 +224,22 @@ parseReqSignature = ReqSignature
           ])
 
 parseBaseUrl :: Parser BaseUrl
-parseBaseUrl = option (str >>= readBaseUrl) $ mconcat [
+parseBaseUrl = option (str >>= Servant.parseBaseUrl) $ mconcat [
       long "base-url"
-    , value (BaseUrl Http "chinesepod.com" 80)
+    , value (BaseUrl Http "chinesepod.com" 80 "/")
     , help "ChinesePod host (defaults to http://chinesepod.com:80)"
     , metavar "URI"
     ]
 
-readBaseUrl :: String -> ReadM BaseUrl
-readBaseUrl strURI =
-    case parseURI strURI of
-      Just uri -> do
-        baseUrlScheme <- case uriScheme uri of
-          "http:"    -> return Http
-          "https:"   -> return Https
-          _otherwise -> fail $ "Unsupported URI scheme " ++ show (uriScheme uri)
-        (baseUrlHost, baseUrlPort) <- case uriAuthority uri of
-          Just auth -> do
-            let host = uriRegName auth
-            port <- case uriPort auth of
-              ""         -> return 80
-              ':':port   -> autoFromRead port
-              _otherwise -> fail $ "Unexpected port " ++ show (uriPort auth)
-            return (host, port)
-          Nothing ->
-            fail "No URI authority specified"
-        return BaseUrl{..}
-      Nothing ->
-        fail $ "Could not parse URI"
-
-autoFromRead :: forall a. (Read a, Typeable a) => String -> ReadM a
-autoFromRead strA =
-    case tryRead strA of
-      Just a  -> return a
-      Nothing -> parseFailure (T.pack strA)
-
-autoFromText :: forall a. (FromText a, Typeable a) => String -> ReadM a
+autoFromText :: forall a. (FromHttpApiData a, Typeable a) => String -> ReadM a
 autoFromText strA =
-    case fromText (T.pack strA) of
-      Just a  -> return a
-      Nothing -> parseFailure (T.pack strA)
+    case parseQueryParam (T.pack strA) of
+      Right a   -> return a
+      Left  err -> parseFailure err
+
+{-------------------------------------------------------------------------------
+  Auxiliary: orphans
+-------------------------------------------------------------------------------}
+
+instance MonadThrow ReadM where
+  throwM = fail . show

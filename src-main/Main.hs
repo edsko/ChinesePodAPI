@@ -2,10 +2,12 @@
 module Main (main) where
 
 import Data.Binary
+import Network.HTTP.Client (newManager)
+import Network.HTTP.Client.TLS (tlsManagerSettings)
+import Servant.Client
 import System.Directory
-import Servant.Client (ServantError(..))
-import Text.Show.Pretty
 import Text.Printf (printf)
+import Text.Show.Pretty
 import qualified Data.Map             as Map
 import qualified Data.ByteString.Lazy as BS.L
 
@@ -16,12 +18,12 @@ import qualified Servant.ChinesePod.Vocab as Vocab
 import Options
 
 -- | Download the full lesson index
-downloadIndex :: ChinesePodAPI -> RespLogin -> EitherT ServantError IO ()
+downloadIndex :: ChinesePodAPI -> RespLogin -> ClientM ()
 downloadIndex ChinesePodAPI{..} RespLogin{..} = do
     liftIO $ createDirectoryIfMissing True "./index"
     go 0
   where
-    go :: Int -> EitherT ServantError IO ()
+    go :: Int -> ClientM ()
     go page = do
         pageDownloaded <- liftIO $ doesFileExist pageFile
         if pageDownloaded
@@ -52,12 +54,12 @@ downloadIndex ChinesePodAPI{..} RespLogin{..} = do
     resultsPerPage = 10
 
 -- | Download lesson content
-downloadContent :: ChinesePodAPI -> RespLogin -> EitherT ServantError IO ()
+downloadContent :: ChinesePodAPI -> RespLogin -> ClientM ()
 downloadContent ChinesePodAPI{..} RespLogin{..} = do
     liftIO $ createDirectoryIfMissing True "./content"
     goPage 0
   where
-    goPage :: Int -> EitherT ServantError IO ()
+    goPage :: Int -> ClientM ()
     goPage pageNum = do
         pageExists <- liftIO $ doesFileExist pageFile
         if not pageExists
@@ -69,7 +71,7 @@ downloadContent ChinesePodAPI{..} RespLogin{..} = do
       where
         pageFile = "./index/" ++ printf "%04d" pageNum
 
-    goLesson :: Lesson -> EitherT ServantError IO ()
+    goLesson :: Lesson -> ClientM ()
     goLesson Lesson{lessonV3Id = V3Id lessonId} = do
        lessonExists <- liftIO $ doesFileExist lessonFile
        if lessonExists
@@ -119,22 +121,23 @@ exec CommandExportVocab =
     exportVocab
 
 withCPod :: OptionsCPod
-         -> (ChinesePodAPI -> RespLogin -> EitherT ServantError IO ())
+         -> (ChinesePodAPI -> RespLogin -> ClientM ())
          -> IO ()
 withCPod OptionsCPod{..} handler = do
-    mRes <- runEitherT runHandler
+    mgr  <- newManager tlsManagerSettings
+    mRes <- runClientM runHandler (ClientEnv mgr optionsBaseUrl)
     case mRes of
       Left  err -> logServantError err
       Right ()  -> return ()
   where
-    runHandler :: EitherT ServantError IO ()
+    runHandler :: ClientM ()
     runHandler = do
         respLogin <- cpodLogin optionsReqLogin
         handler cpodAPI respLogin
         OK <- cpodLogout $ fromLogin respLogin ()
         return ()
 
-    cpodAPI@ChinesePodAPI{..} = chinesePodAPI optionsBaseUrl
+    cpodAPI@ChinesePodAPI{..} = chinesePodAPI
 
 logServantError :: ServantError -> IO ()
 logServantError err = do
@@ -145,16 +148,11 @@ logServantError err = do
     print err'
   where
     body :: ServantError -> (ServantError, Maybe BS.L.ByteString)
-    body FailureResponse{..} =
-      (FailureResponse{responseBody = omitted, ..}, Just responseBody)
-    body DecodeFailure{..} =
-      (DecodeFailure{responseBody = omitted, ..}, Just responseBody)
-    body UnsupportedContentType{..} =
-      (UnsupportedContentType{responseBody = omitted, ..}, Just responseBody)
-    body ConnectionError{..} =
-      (ConnectionError{..}, Nothing)
-    body InvalidContentTypeHeader{..} =
-      (InvalidContentTypeHeader{responseBody = omitted, ..}, Just responseBody)
+    body (FailureResponse            r) = ( FailureResponse            r { responseBody = omitted } , Just (responseBody r) )
+    body (DecodeFailure txt          r) = ( DecodeFailure txt          r { responseBody = omitted } , Just (responseBody r) )
+    body (UnsupportedContentType typ r) = ( UnsupportedContentType typ r { responseBody = omitted } , Just (responseBody r) )
+    body (InvalidContentTypeHeader   r) = ( InvalidContentTypeHeader   r { responseBody = omitted } , Just (responseBody r) )
+    body (ConnectionError e           ) = ( ConnectionError e                                       , Nothing               )
 
     omitted :: BS.L.ByteString
     omitted = "<<written to responseBody.servant>>"

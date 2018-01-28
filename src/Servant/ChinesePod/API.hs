@@ -55,11 +55,14 @@ import Prelude hiding (Word)
 import Control.Monad
 import Crypto.Hash
 import Data.Aeson.Types hiding ((.:?))
+import Data.Bifunctor (bimap)
 import Data.Binary (Binary)
 import Data.Data (Data)
+import Data.Either (rights)
 import Data.List (sortBy)
 import Data.Map (Map)
 import Data.Maybe (catMaybes)
+import Data.Monoid ((<>))
 import Data.Ord (comparing)
 import Data.Proxy
 import Data.String (IsString)
@@ -68,6 +71,7 @@ import Data.Typeable
 import GHC.Generics
 import Servant.API
 import Text.Show.Pretty (PrettyVal(..))
+import Web.FormUrlEncoded
 import qualified Data.Aeson.Types     as Aeson
 import qualified Data.ByteString      as BS
 import qualified Data.ByteString.UTF8 as BS.UTF8
@@ -208,13 +212,13 @@ data RespGetUserInfo = RespGetUserInfo {
 -------------------------------------------------------------------------------}
 
 newtype UserId = UserId { userIdString :: String }
-  deriving (Show, Generic, Data, Eq, Ord, FromJSON, ToText, FromText, IsString)
+  deriving (Show, Generic, Data, Eq, Ord, FromJSON, ToHttpApiData, FromHttpApiData, IsString)
 
 newtype AccessToken = AccessToken { accessTokenString :: String }
-  deriving (Show, Generic, Data, Eq, Ord, FromJSON, ToText, FromText, IsString)
+  deriving (Show, Generic, Data, Eq, Ord, FromJSON, ToHttpApiData, FromHttpApiData, IsString)
 
 newtype V3Id = V3Id { v3IdString :: String }
-  deriving (Show, Generic, Data, Eq, Ord, FromJSON, ToText, FromText, IsString)
+  deriving (Show, Generic, Data, Eq, Ord, FromJSON, ToHttpApiData, FromHttpApiData, IsString)
 
 -- | Some ChinesePod requests simply return OK
 data OK = OK
@@ -466,9 +470,9 @@ data Expansion = Expansion {
 -------------------------------------------------------------------------------}
 
 -- | The 'ToText' instance for 'ReqSignature' is the hash
-instance ToText ReqSignature where
-    toText ReqSignature{..} =
-        toText . show . sha1 . BS.UTF8.fromString $ concat [
+instance ToHttpApiData ReqSignature where
+    toQueryParam ReqSignature{..} =
+        toQueryParam . show . sha1 . BS.UTF8.fromString $ concat [
             reqSignatureClientSecret
           , reqSignatureUserPassword
           ]
@@ -476,55 +480,65 @@ instance ToText ReqSignature where
         sha1 :: BS.ByteString -> Digest SHA1
         sha1 = hash
 
-instance ToFormUrlEncoded ReqLogin where
-    toFormUrlEncoded ReqLogin{..} = [
-          ( "client_id" , toText reqLoginClientId  )
-        , ( "email"     , toText reqLoginEmail     )
-        , ( "signature" , toText reqLoginSignature )
+instance ToForm ReqLogin where
+    toForm ReqLogin{..} = mkForm [
+          ( "client_id" , toQueryParam reqLoginClientId  )
+        , ( "email"     , toQueryParam reqLoginEmail     )
+        , ( "signature" , toQueryParam reqLoginSignature )
         ]
 
-instance ToFormUrlEncoded ReqLogout where
-    toFormUrlEncoded ReqLogout{..} = [
-          ( "access_token" , toText reqLogoutAccessToken )
-        , ( "user_id"      , toText reqLogoutUserId      )
+instance ToForm ReqLogout where
+    toForm ReqLogout{..} = mkForm [
+          ( "access_token" , toQueryParam reqLogoutAccessToken )
+        , ( "user_id"      , toQueryParam reqLogoutUserId      )
         ]
 
-instance ToFormUrlEncoded ReqGetUserInfo where
-    toFormUrlEncoded ReqGetUserInfo{..} = [
-          ( "access_token" , toText reqGetUserInfoAccessToken )
-        , ( "user_id"      , toText reqGetUserInfoUserId      )
+instance ToForm ReqGetUserInfo where
+    toForm ReqGetUserInfo{..} = mkForm [
+          ( "access_token" , toQueryParam reqGetUserInfoAccessToken )
+        , ( "user_id"      , toQueryParam reqGetUserInfoUserId      )
         ]
 
-instance ToFormUrlEncoded ReqSearchLessons where
-    toFormUrlEncoded ReqSearchLessons{..} = [
-          ( "access_token" , toText reqSearchLessonsAccessToken )
-        , ( "user_id"      , toText reqSearchLessonsUserId      )
-        , ( "search"       , toText reqSearchLessonsSearch      )
+instance ToForm ReqSearchLessons where
+    toForm ReqSearchLessons{..} = mkForm ([
+          ( "access_token" , toQueryParam reqSearchLessonsAccessToken )
+        , ( "user_id"      , toQueryParam reqSearchLessonsUserId      )
+        , ( "search"       , toQueryParam reqSearchLessonsSearch      )
         ] ++ catMaybes [
-          optFormArg "search_level" (toText . Str) reqSearchLessonsSearchLevel
-        , optFormArg "num_results"  (toText)       reqSearchLessonsNumResults
-        , optFormArg "page"         (toText)       reqSearchLessonsPage
-        ]
+          optFormArg "search_level" (toQueryParam . Str) reqSearchLessonsSearchLevel
+        , optFormArg "num_results"  (toQueryParam)       reqSearchLessonsNumResults
+        , optFormArg "page"         (toQueryParam)       reqSearchLessonsPage
+        ])
 
-instance ToFormUrlEncoded ReqGetLatestLessons where
-    toFormUrlEncoded ReqGetLatestLessons{..} = [
-          ( "access_token" , toText reqGetLatestLessonsAccessToken )
-        , ( "user_id"      , toText reqGetLatestLessonsUserId      )
+instance ToForm ReqGetLatestLessons where
+    toForm ReqGetLatestLessons{..} = mkForm ([
+          ( "access_token" , toQueryParam reqGetLatestLessonsAccessToken )
+        , ( "user_id"      , toQueryParam reqGetLatestLessonsUserId      )
         ] ++ catMaybes [
-          optFormArg "page"     (toText)       reqGetLatestLessonsPage
-        , optFormArg "count"    (toText)       reqGetLatestLessonsCount
-        , optFormArg "lang"     (toText)       reqGetLatestLessonsLang
-        , optFormArg "level_id" (toText . Int) reqGetLatestLessonsLevelId
-        ]
+          optFormArg "page"     (toQueryParam)       reqGetLatestLessonsPage
+        , optFormArg "count"    (toQueryParam)       reqGetLatestLessonsCount
+        , optFormArg "lang"     (toQueryParam)       reqGetLatestLessonsLang
+        , optFormArg "level_id" (toQueryParam . Int) reqGetLatestLessonsLevelId
+        ])
 
-instance ToFormUrlEncoded ReqGetLesson where
-     toFormUrlEncoded ReqGetLesson{..} = [
-          ( "access_token" , toText reqGetLessonAccessToken )
-        , ( "user_id"      , toText reqGetLessonUserId      )
-        , ( "v3id"         , toText reqGetLessonV3Id        )
+instance ToForm ReqGetLesson where
+     toForm ReqGetLesson{..} = mkForm ([
+          ( "access_token" , toQueryParam reqGetLessonAccessToken )
+        , ( "user_id"      , toQueryParam reqGetLessonUserId      )
+        , ( "v3id"         , toQueryParam reqGetLessonV3Id        )
         ] ++ catMaybes [
-          optFormArg "type" (toText) reqGetLessonType
-        ]
+          optFormArg "type" (toQueryParam) reqGetLessonType
+        ])
+
+{-------------------------------------------------------------------------------
+  Auxiliary: Constructing forms
+-------------------------------------------------------------------------------}
+
+-- | Similar to 'fromEntriesByKey', but allowing only a single value per
+-- entry and requires the /caller/ to call 'toQueryParam' on the values
+-- (so that different entries can be of different types).
+mkForm :: [(Text, Text)] -> Form
+mkForm = Form . HashMap.fromListWith (<>) . map (bimap toFormKey (:[]))
 
 optFormArg :: Text -> (a -> Text) -> Maybe a -> Maybe (Text, Text)
 optFormArg nm f = fmap $ \a -> (nm, f a)
@@ -601,20 +615,20 @@ instance FromJSON Lesson where
       lessonReviewMp3            <- obj .:? "review_mp3"
       return Lesson{..}
 
-instance ToText LessonContentType where
-    toText LessonContentAll        = "all"
-    toText LessonContentExercise   = "exercise"
-    toText LessonContentVocabulary = "vocabulary"
-    toText LessonContentDialogue   = "dialogue"
-    toText LessonContentGrammar    = "grammar"
+instance ToHttpApiData LessonContentType where
+    toQueryParam LessonContentAll        = "all"
+    toQueryParam LessonContentExercise   = "exercise"
+    toQueryParam LessonContentVocabulary = "vocabulary"
+    toQueryParam LessonContentDialogue   = "dialogue"
+    toQueryParam LessonContentGrammar    = "grammar"
 
-instance FromText LessonContentType where
-    fromText "all"        = Just $ LessonContentAll
-    fromText "exercise"   = Just $ LessonContentExercise
-    fromText "vocabulary" = Just $ LessonContentVocabulary
-    fromText "dialogue"   = Just $ LessonContentDialogue
-    fromText "grammar"    = Just $ LessonContentGrammar
-    fromText _otherwise   = Nothing
+instance FromHttpApiData LessonContentType where
+    parseQueryParam "all"        = Right $ LessonContentAll
+    parseQueryParam "exercise"   = Right $ LessonContentExercise
+    parseQueryParam "vocabulary" = Right $ LessonContentVocabulary
+    parseQueryParam "dialogue"   = Right $ LessonContentDialogue
+    parseQueryParam "grammar"    = Right $ LessonContentGrammar
+    parseQueryParam typ          = Left $ T.pack $ "Invalid lesson content type " ++ show typ
 
 instance FromJSON LessonContent where
     parseJSON = withObject "LessonContent" $ \obj -> do
@@ -815,10 +829,10 @@ instance FromJSON Vocabulary where
 
 instance FromJSON Expansion where
      parseJSON (Object obj) =
-         Expansion . Map.fromList <$> mapM parseField (HashMap.toList obj)
+         Expansion . Map.fromList <$> mapM parseFld (HashMap.toList obj)
        where
-         parseField :: (Text, Value) -> Parser (String, [Example])
-         parseField (word, val) = do
+         parseFld :: (Text, Value) -> Parser (String, [Example])
+         parseFld (word, val) = do
            examples <- parseJSON val
            return (T.unpack word, examples)
 
@@ -857,46 +871,46 @@ instance ToStrOrInt Level where
 
 instance FromStrOrInt Int where
   fromStr = tryRead . T.unpack
-  fromInt = Just
+  fromInt = Right
 
 instance FromStrOrInt UserId where
-  fromStr = Just . UserId . T.unpack
-  fromInt = Just . UserId . show
+  fromStr = Right . UserId . T.unpack
+  fromInt = Right . UserId . show
 
 instance FromStrOrInt Bool where
   fromStr = go
     where
-      go "0" = Just False
-      go "1" = Just True
-      go _   = Nothing
+      go "0" = Right False
+      go "1" = Right True
+      go _   = Left "Expected 0 or 1"
 
   fromInt = go
     where
-      go 0 = Just False
-      go 1 = Just True
-      go _ = Nothing
+      go 0 = Right False
+      go 1 = Right True
+      go _ = Left "Expected 0 or 1"
 
 instance FromStrOrInt (Maybe Level) where
   fromStr = go
     where
-      go "Newbie"             = Just $ Just LevelNewbie
-      go "Elementary"         = Just $ Just LevelElementary
-      go "Intermediate"       = Just $ Just LevelIntermediate
-      go "Upper Intermediate" = Just $ Just LevelUpperIntermediate
-      go "Advanced"           = Just $ Just LevelAdvanced
-      go "Media"              = Just $ Just LevelMedia
-      go other                = Just $ Just (LevelOther $ T.unpack other)
+      go "Newbie"             = Right $ Just LevelNewbie
+      go "Elementary"         = Right $ Just LevelElementary
+      go "Intermediate"       = Right $ Just LevelIntermediate
+      go "Upper Intermediate" = Right $ Just LevelUpperIntermediate
+      go "Advanced"           = Right $ Just LevelAdvanced
+      go "Media"              = Right $ Just LevelMedia
+      go other                = Right $ Just (LevelOther $ T.unpack other)
 
   fromInt = go
     where
-      go 0 = Just $ Nothing
-      go 1 = Just $ Just LevelNewbie
-      go 2 = Just $ Just LevelElementary
-      go 3 = Just $ Just LevelIntermediate
-      go 4 = Just $ Just LevelUpperIntermediate
-      go 5 = Just $ Just LevelAdvanced
-      go 6 = Just $ Just LevelMedia
-      go _ = Nothing
+      go 0 = Right $ Nothing
+      go 1 = Right $ Just LevelNewbie
+      go 2 = Right $ Just LevelElementary
+      go 3 = Right $ Just LevelIntermediate
+      go 4 = Right $ Just LevelUpperIntermediate
+      go 5 = Right $ Just LevelAdvanced
+      go 6 = Right $ Just LevelMedia
+      go i = Left $ T.pack $ "Invalid Level " ++ show i
 
 {-------------------------------------------------------------------------------
   Values that can be encoded as either strings or as numbers
@@ -916,26 +930,27 @@ class ToStrOrInt a where
   toInt :: a -> Int
 
 class FromStrOrInt a where
-  fromStr :: Text -> Maybe a
-  fromInt :: Int  -> Maybe a
+  fromStr :: Text -> Either Text a
+  fromInt :: Int  -> Either Text a
 
 instance (Typeable a, FromStrOrInt a) => FromJSON (StrOrInt a) where
     parseJSON (String s) = case fromStr s of
-                             Just level -> return $ Str level
-                             Nothing    -> parseFailure s
+                             Right level -> return $ Str level
+                             Left  err   -> parseFailure err
     parseJSON (Number n) = case fromInt (round n) of
-                             Just level -> return $ Int level
-                             Nothing    -> parseFailure (T.pack $ show n)
+                             Right level -> return $ Int level
+                             Left  err   -> parseFailure err
     parseJSON val        = typeMismatch (show (typeOf (undefined :: a))) val
 
-instance FromStrOrInt a => FromText (StrOrInt a) where
-    fromText txt = maybe (fmap Str $ fromStr txt)
-                         (fmap Int . fromInt)
-                         (tryRead $ T.unpack txt)
+instance FromStrOrInt a => FromHttpApiData (StrOrInt a) where
+  parseQueryParam txt =
+      either (\_err -> fmap Str $ fromStr txt)
+             (fmap Int . fromInt)
+             (tryRead $ T.unpack txt)
 
-instance ToStrOrInt a => ToText (StrOrInt a) where
-  toText (Str a) = toStr a
-  toText (Int a) = T.pack $ show (toInt a)
+instance ToStrOrInt a => ToHttpApiData (StrOrInt a) where
+  toQueryParam (Str a) = toStr a
+  toQueryParam (Int a) = T.pack $ show (toInt a)
 
 {-------------------------------------------------------------------------------
   Generic search results
@@ -949,16 +964,20 @@ data SearchResults a = SearchResults {
 
 instance FromJSON a => FromJSON (SearchResults a) where
     parseJSON = withObject "SearchResults" $ \obj -> do
-        let rawResults = catMaybes $ map extractRaw (HashMap.toList obj)
+        let rawResults = rights $ map extractRaw (HashMap.toList obj)
         searchResults      <- Map.fromList <$> mapM parseRaw rawResults
         searchResultsTotal <- obj .:~ "total"
         return SearchResults{..}
       where
-        extractRaw :: (Text, Value) -> Maybe (Int, Value)
-        extractRaw (idx, val) = do idx' <- fromText idx ; return (idx', val)
+        extractRaw :: (Text, Value) -> Either Text (Int, Value)
+        extractRaw (idx, val) = do
+            idx' <- parseQueryParam idx
+            return (idx', val)
 
         parseRaw :: (Int, Value) -> Parser (Int, a)
-        parseRaw (idx, val) = do val' <- parseJSON val ; return (idx, val')
+        parseRaw (idx, val) = do
+            val' <- parseJSON val
+            return (idx, val')
 
 {-------------------------------------------------------------------------------
   Undocumented fields
@@ -973,11 +992,11 @@ type Undocumented = Maybe
   Parser auxiliary
 -------------------------------------------------------------------------------}
 
-tryRead :: Read a => String -> Maybe a
+tryRead :: Read a => String -> Either Text a
 tryRead strA =
       case filter fullParse (readsPrec 0 strA) of
-        [(a, _)]   -> Just a
-        _otherwise -> Nothing
+        [(a, _)]   -> Right a
+        _otherwise -> Left $ T.pack $ "Failed to parse " ++ show strA
     where
       fullParse :: (a, String) -> Bool
       fullParse = null . snd
@@ -1009,11 +1028,13 @@ instance (Typeable a, FromJSON a) => FromJSON (MaybeIndexed a) where
         MaybeIndexed <$> mapM parseJSON (Vector.toList arr)
 
     parseJSON (Object obj) = do
-        let rawResults = catMaybes $ map extractRaw (HashMap.toList obj)
+        let rawResults = rights $ map extractRaw (HashMap.toList obj)
         MaybeIndexed <$> mapM parseJSON (sortRaw rawResults)
       where
-        extractRaw :: (Text, Value) -> Maybe (Int, Value)
-        extractRaw (idx, val) = do idx' <- fromText idx ; return (idx', val)
+        extractRaw :: (Text, Value) -> Either Text (Int, Value)
+        extractRaw (idx, val) = do
+            idx' <- parseQueryParam idx
+            return (idx', val)
 
         sortRaw :: [(Int, Value)] -> [Value]
         sortRaw = map snd . sortBy (comparing fst)

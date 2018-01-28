@@ -26,9 +26,9 @@ library
                        Servant.ChinesePod.Vocab
                        Servant.ChinesePod.Vocab.Word
   other-modules:       Servant.ChinesePod.Util.Orphans.PrettyVal
-  build-depends:         base >=4.8 && <4.9
-                         -- we assume the behaviour of aeson 0.10 for Maybe
-                       , aeson == 0.10.*
+  build-depends:         base >=4.10 && <4.11
+                         -- Aeson changed behaviour a few times recently
+                       , aeson >= 0.2
                        , aeson-pretty
                        , binary
                        , bytestring
@@ -37,11 +37,13 @@ library
                        , directory
                        , either
                        , filepath
+                         -- servant moved some defs to http-api-data 0.3
+                       , http-api-data >= 0.3
                        , network-uri
                          -- 1.6.9 introduces some new PrettyVal instances
                        , pretty-show >= 1.6.9
                        , process
-                       , servant
+                       , servant >= 0.9
                        , servant-client
                        , template-haskell
                        , text
@@ -59,6 +61,7 @@ library
                        LambdaCase
                        MultiParamTypeClasses
                        NamedFieldPuns
+                       NoMonomorphismRestriction
                        RecordWildCards
                        ScopedTypeVariables
                        TypeOperators
@@ -75,10 +78,16 @@ executable cpod-query
                        , bytestring
                        , containers
                        , directory
+                       , exceptions
+                       , http-api-data
+                       , http-client
+                       , http-client-tls
                        , network-uri
                        , optparse-applicative
                        , pretty-show
                        , servant
+                       -- 0.12 introduces ClientM as an explicit type arg as
+                       -- well as some other backwards incompatible changes
                        , servant-client
                        , text
   hs-source-dirs:      src-main
