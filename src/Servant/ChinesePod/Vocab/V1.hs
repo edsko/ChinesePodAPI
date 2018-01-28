@@ -1,4 +1,4 @@
-module Servant.ChinesePod.Vocab (
+module Servant.ChinesePod.Vocab.V1 (
     Vocab(..)
   , Lesson(..)
   , Word(..)

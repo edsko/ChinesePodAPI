@@ -23,7 +23,8 @@ library
                        Servant.ChinesePod.Client
                        Servant.ChinesePod.HSK.Aux
                        Servant.ChinesePod.HSK.HSK2012
-                       Servant.ChinesePod.Vocab
+                       Servant.ChinesePod.Vocab.V1
+                       Servant.ChinesePod.Vocab.V2
                        Servant.ChinesePod.Vocab.Word
   other-modules:       Servant.ChinesePod.Util.Orphans.PrettyVal
   build-depends:         base >=4.10 && <4.11

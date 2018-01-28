@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Main (main) where
 
+import Control.Monad
 import Data.Binary
 import Network.HTTP.Client (newManager)
 import Network.HTTP.Client.TLS (tlsManagerSettings)
@@ -10,10 +11,11 @@ import Text.Printf (printf)
 import Text.Show.Pretty
 import qualified Data.Map             as Map
 import qualified Data.ByteString.Lazy as BS.L
+import qualified Data.Text            as T
 
 import Servant.ChinesePod.API
 import Servant.ChinesePod.Client
-import qualified Servant.ChinesePod.Vocab as Vocab
+import qualified Servant.ChinesePod.Vocab.V2 as Vocab
 
 import Options
 
@@ -92,9 +94,15 @@ downloadContent ChinesePodAPI{..} RespLogin{..} = do
 -- | Export all vocabulary to a single file
 exportVocab :: IO ()
 exportVocab = do
-    lessonFiles <- filter (not . hidden) <$> getDirectoryContents "./content"
-    lessons     <- mapM decodeFile $ map ("./content/" ++) lessonFiles
-    encodeFile "./vocab" $ Vocab.extractVocab lessons
+    lessonFiles  <- filter (not . hidden) <$> getDirectoryContents "./content"
+    lessons      <- mapM decodeFile $ map ("./content/" ++) lessonFiles
+    let (skipped, vocab) = Vocab.extractVocab lessons
+    encodeFile "./vocab" vocab
+    forM_ skipped $ \Vocab.Skipped{..} -> putStrLn $ concat [
+        "Skipped " ++ v3IdString skippedV3Id
+      , " (" ++ skippedTitle ++ "): "
+      , T.unpack skippedReason
+      ]
   where
     hidden :: FilePath -> Bool
     hidden ('.':_) = True

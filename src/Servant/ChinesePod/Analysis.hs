@@ -8,8 +8,8 @@ module Servant.ChinesePod.Analysis (
     -- TODO: export list
     module Servant.ChinesePod.Analysis
     -- Re-exports
-  , module Servant.ChinesePod.Vocab
-  , module Servant.ChinesePod.HSK.HSK2012
+  , module Vocab
+  , module HSK
   , module Data.IORef
   ) where
 
@@ -33,8 +33,8 @@ import Text.Printf (printf)
 import qualified Data.Map as Map hiding ((!))
 import qualified Data.Set as Set
 
-import Servant.ChinesePod.Vocab
-import Servant.ChinesePod.HSK.HSK2012
+import Servant.ChinesePod.Vocab.V1      as Vocab
+import Servant.ChinesePod.HSK.HSK2012   as HSK
 import qualified Servant.ChinesePod.API as API
 
 {-------------------------------------------------------------------------------
