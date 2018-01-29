@@ -30,11 +30,13 @@ library
                        Servant.ChinesePod.Vocab.Word
                        Servant.ChinesePod.Util.Migrate
                        Servant.ChinesePod.Util.Orphans.PrettyVal
-  build-depends:         base >=4.10 && <4.11
+                       Servant.ChinesePod.Util.String
+  build-depends:         base >=4.9 && <4.11
                          -- Aeson changed behaviour a few times recently
                        , aeson >= 0.2
                        , aeson-pretty
                        , binary
+                       , binary-orphans
                        , bytestring
                        , containers
                        , cryptohash
@@ -51,6 +53,7 @@ library
                        , servant-client
                        , template-haskell
                        , text
+                       , time
                        , transformers
                        , unordered-containers
                        , utf8-string

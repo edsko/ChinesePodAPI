@@ -3,6 +3,7 @@ module Servant.ChinesePod.Util.Orphans.PrettyVal () where
 
 import Data.Map (Map)
 import Data.Set (Set)
+import Data.Time
 import Text.Show.Pretty
 import qualified Data.Map                  as Map
 import qualified Data.Set                  as Set
@@ -26,3 +27,10 @@ instance PrettyVal a => PrettyVal (Set a) where
 
 instance PrettyVal Aeson.Value where
   prettyVal = String . BS.L.UTF8.toString . Aeson.Pretty.encodePretty
+
+{-------------------------------------------------------------------------------
+  Time
+-------------------------------------------------------------------------------}
+
+instance PrettyVal LocalTime where
+  prettyVal = String . formatTime defaultTimeLocale "%F %T"

@@ -14,11 +14,13 @@ module Servant.ChinesePod.Vocab.V2 (
 import Prelude hiding (Word)
 import Data.Bifunctor (second)
 import Data.Binary (Binary, decodeFile)
+import Data.Binary.Orphans ()
 import Data.Data (Data)
 import Data.Either (partitionEithers)
-import Data.Map (Map)
 import Data.List (partition, isInfixOf)
+import Data.Map (Map)
 import Data.Text (Text)
+import Data.Time
 import GHC.Generics
 import Text.Show.Pretty (PrettyVal(..))
 import qualified Data.Map  as Map
@@ -27,16 +29,18 @@ import qualified Data.Text as T
 import Servant.ChinesePod.API (V3Id(..))
 import Servant.ChinesePod.Vocab.Word
 import Servant.ChinesePod.Util.Migrate
+import Servant.ChinesePod.Util.String
 import Servant.ChinesePod.Vocab.V1 (Level(..))
 import qualified Servant.ChinesePod.API      as API
 import qualified Servant.ChinesePod.Vocab.V1 as V1
 
 data Lesson = Lesson {
-      title   :: String
-    , level   :: Level
-    , hosts   :: String
-    , isVideo :: Bool
-    , key     :: [Word]
+      title    :: String
+    , level    :: Level
+    , hosts    :: String
+    , isVideo  :: Bool
+    , key      :: [Word]
+    , released :: LocalTime
 
       -- | Supplemental vocabulary that appears somewhere in the dialogue
     , supDialog :: [Word]
@@ -83,11 +87,28 @@ extractVocab = second mkVocab . partitionEithers . map go
                           }
         Right lesson -> Right $ (API.lessonContentV3Id content, lesson)
 
+-- | Extract the information we need about the lesson
+--
+-- The check if this is a video lesson is a bit of a heuristic:
+--
+-- * The `lessonContentVideoLesson` field never seems to be set, but we
+--   might as well check for it anyway.
+-- * Some, but not all, video lessons have "video" in 'lessonContentTopics'
+-- * All of them seem to have a non-empty 'lessonContentVideo', but non-video
+--   lessons may still have a 'Just' value there; some even have "N;" as
+--   the value there.
+-- * Some have 'lessonContentType' set to "video"
 extractLesson :: API.LessonContent -> Either Text Lesson
 extractLesson API.LessonContent{..} = do
     let title   = lessonContentTitle
         hosts   = lessonContentHosts
-        isVideo = lessonContentVideoLesson == Just True
+        isVideo = or [ lessonContentVideoLesson == Just True
+                     , "video" `elem` map (trim . lowercase) lessonContentTopics
+                     , maybe 0 length lessonContentVideo > 2
+                     , trim (lowercase lessonContentType) == "video"
+                     ]
+
+    released   <- parseTimeM True defaultTimeLocale "%F %T" lessonContentPublicationTimestamp
     level      <- extractLevel lessonContentLevel
     vocabulary <- maybeToEither "Lacks lacks vocabulary" lessonContentVocabulary
     let key = map extractWord $ API.vocabularyKeyVocab vocabulary
@@ -172,7 +193,10 @@ instance Migrate Lesson where
       , level     = level
       , hosts     = hosts
       , key       = key
-      , isVideo   = False -- we used to filter all these out
+        -- we used to filter all these out
+      , isVideo   = False
+        -- sadly, we don't know the release date
+      , released  = LocalTime (ModifiedJulianDay 0) (TimeOfDay 0 0 0)
       , supDialog = supDialog
       , supExtra  = supExtra
       }
