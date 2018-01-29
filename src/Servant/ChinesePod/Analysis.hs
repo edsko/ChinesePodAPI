@@ -20,6 +20,7 @@ import Data.Map (Map)
 import Data.Set (Set)
 import Data.Maybe (mapMaybe)
 import Data.Ord (comparing)
+import Data.Time
 import GHC.Generics (Generic)
 import System.Directory (doesFileExist)
 import System.IO
@@ -199,10 +200,12 @@ getPickedInfo = do
 
 -- | Information about a lesson
 data LessonSummary = LessonSummary {
-      lessonSummaryId    :: V3Id
-    , lessonSummaryTitle :: String
-    , lessonSummaryLevel :: Level
-    , lessonSummaryRel   :: [Word]
+      lessonSummaryId       :: V3Id
+    , lessonSummaryTitle    :: String
+    , lessonSummaryIsVideo  :: Bool
+    , lessonSummaryReleased :: LocalTime
+    , lessonSummaryLevel    :: Level
+    , lessonSummaryRel      :: [Word]
 
       -- | Irrelevant but harmless
     , lessonSummaryHarmless :: [(Word, [HSKLevel])]
@@ -225,6 +228,9 @@ showLessonSummary includeHarmless LessonSummary{..} = concat [
     , lessonSummaryTitle
     , ", "
     , show $ lessonSummaryLevel
+    , ", "
+    , formatTime defaultTimeLocale "%F" lessonSummaryReleased
+    , if lessonSummaryIsVideo then ", video" else ""
     , "): "
     , intercalate "," $ map source lessonSummaryRel
     , " vs "
@@ -268,6 +274,8 @@ summarizeLesson LessonInfo{ lessonId
     return LessonSummary {
         lessonSummaryId       = lessonId
       , lessonSummaryTitle    = title
+      , lessonSummaryIsVideo  = isVideo
+      , lessonSummaryReleased = released
       , lessonSummaryLevel    = level
       , lessonSummaryRel      = rel
       , lessonSummaryHarmless = harmless
@@ -530,6 +538,23 @@ skip simpl = updateAnalysisState aux
         analysisTodo'      = filter ((/= simpl) . source) analysisTodo
         analysisAvailable' = cullRelevant (Set.singleton simpl)
                                analysisAvailable
+
+-- | Add a word back into TODO
+--
+-- NOTE: This may reintroduce lessons into 'analysisAvailable' that were
+-- previously explicitly removed.
+unskip :: Simpl -> IO ()
+unskip simpl = updateAnalysisState aux
+  where
+    aux :: AnalysisStatic -> AnalysisDynamic -> AnalysisDynamic
+    aux AnalysisStatic{..} AnalysisDynamic{..} = AnalysisDynamic{
+          analysisTodo      = newTodo ++ analysisTodo
+        , analysisPicked    = analysisPicked
+        , analysisAvailable = Map.union newAvailable analysisAvailable
+        }
+      where
+        newTodo      = filter ((== simpl) . source) analysisAllWords
+        newAvailable = initRelevant (Set.singleton simpl) analysisAllLessons
 
 {-------------------------------------------------------------------------------
   Focusing on a subset
