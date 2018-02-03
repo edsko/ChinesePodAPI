@@ -2,8 +2,68 @@
 --
 -- This module is intended for use in @ghci@.
 module Servant.ChinesePod.Analysis (
-    -- TODO: export list
-    module Servant.ChinesePod.Analysis
+    -- * Initialization
+    initState
+  , resetVocab
+    -- * Saving and loading
+    -- ** Analysis state
+  , save
+  , open
+  , openV1
+    -- ** List of harmless words
+  , saveHarmless
+  , openHarmless
+    -- * Tools
+  , showLessonSummary
+  , showWordSummary
+  , searchVocab
+    -- * Operations on the state
+  , filterLessons
+  , dropLesson
+  , pick
+  , skip
+  , unskip
+    -- * Zooming
+  , zoomIn
+  , zoomOut
+  , setFocus
+  , resetFocus
+    -- ** Predicates
+  , atLevel
+  , irrelInHSK
+  , maxNumIrrel
+  , onlyLessons
+  , publishedAfter
+  , publishedAfterYear
+    -- * HSK tools
+  , showHskLevel
+  , showHskSplits
+  , showSearchHsk
+    -- * Dealing with harmless words
+  , showHarmless
+  , markHarmless
+  , analyzeIrrelevant
+    -- * Local optimization
+  , Improvement
+  , improveLocal
+  , showCandidates
+    -- * Export
+  , exportPleco
+  , exportPleco'
+  , exportMarkdown
+  , exportMarkdown'
+  , downloadAudio
+  , downloadAudio'
+    -- * Statistics
+  , printStats
+  , printStats'
+    -- * Summarising
+  , showStateSummary
+    -- ** Sorting keys
+  , countLessonRel
+  , countLessonRelIrrel
+  , countWordAppearsIn
+  , countReallyIrrelevant
     -- Re-exports
   , module State
   , module Vocab
@@ -15,6 +75,7 @@ import Prelude hiding (Word, words)
 import Control.Monad
 import Data.Bifunctor (first)
 import Data.Binary (encodeFile, decodeFile)
+import Data.Functor.Contravariant
 import Data.IORef
 import Data.List (intercalate, sortBy, partition, nub, isInfixOf)
 import Data.Map (Map)
@@ -47,17 +108,6 @@ import qualified Servant.ChinesePod.Analysis.State.V2 as V2
 globalAnalysisState :: IORef AnalysisState
 {-# NOINLINE globalAnalysisState #-}
 globalAnalysisState = unsafePerformIO $ newIORef (error "state not loaded")
-
-updateAnalysisState' :: (AnalysisStatic -> AnalysisDynamic -> (AnalysisDynamic, b))
-                    -> IO b
-updateAnalysisState' f =
-    atomicModifyIORef globalAnalysisState $ \(static, dynamic) ->
-      first (static,) (f static dynamic)
-
-updateAnalysisState :: (AnalysisStatic -> AnalysisDynamic -> AnalysisDynamic)
-                    -> IO ()
-updateAnalysisState f = modifyIORef globalAnalysisState $ \(static, dynamic) ->
-    (static, f static dynamic)
 
 {-------------------------------------------------------------------------------
   Initialization
@@ -173,208 +223,6 @@ openV1 fp = writeIORef globalAnalysisState =<< (v1_to_v2 <$> decodeFile fp)
     v1_to_v2 = migrate
 
 {-------------------------------------------------------------------------------
-  All available information about a lesson
--------------------------------------------------------------------------------}
-
-data LessonInfo = LessonInfo {
-    lessonId :: V3Id
-  , lesson   :: Lesson
-  , relevant :: RelevantLesson
-  }
-
-infoFromRelevant :: V3Id -> RelevantLesson -> IO LessonInfo
-infoFromRelevant lessonId relevant = do
-    (AnalysisStatic{analysisAllLessons}, _) <- readIORef globalAnalysisState
-    return LessonInfo {
-        lessonId = lessonId
-      , lesson   = analysisAllLessons `mapAt` lessonId
-      , relevant = relevant
-      }
-
--- | Get LessonInfo for all available lessons
-getAvailableInfo :: IO [LessonInfo]
-getAvailableInfo = do
-    (_, AnalysisDynamic{analysisAvailable}) <- readIORef globalAnalysisState
-    mapM (uncurry infoFromRelevant) (Map.toList analysisAvailable)
-
--- | Get LessonInfo for currently picked lessons
-getPickedInfo :: IO [LessonInfo]
-getPickedInfo = do
-    (_, AnalysisDynamic{analysisPicked}) <- readIORef globalAnalysisState
-    mapM (uncurry infoFromRelevant) analysisPicked
-
-{-------------------------------------------------------------------------------
-  Query the state
--------------------------------------------------------------------------------}
-
--- | Information about a lesson
-data LessonSummary = LessonSummary {
-      lessonSummaryId       :: V3Id
-    , lessonSummaryTitle    :: String
-    , lessonSummaryIsVideo  :: Bool
-    , lessonSummaryReleased :: LocalTime
-    , lessonSummaryLevel    :: Level
-    , lessonSummaryRel      :: [Word]
-
-      -- | Irrelevant but harmless
-    , lessonSummaryHarmless :: [(Word, [HSKLevel])]
-
-      -- | Truly irrelevant
-    , lessonSummaryIrrel :: [(Word, [HSKLevel])]
-    }
-
-data WordSummary = WordSummary {
-      wordSummarySimpl     :: Simpl
-    , wordSummaryAppearsIn :: [V3Id]
-    }
-
-showLessonSummary :: Bool           -- ^ Show harmless?
-                  -> LessonSummary
-                  -> String
-showLessonSummary includeHarmless LessonSummary{..} = concat [
-      v3IdString lessonSummaryId
-    , " ("
-    , lessonSummaryTitle
-    , ", "
-    , show $ lessonSummaryLevel
-    , ", "
-    , formatTime defaultTimeLocale "%F" lessonSummaryReleased
-    , if lessonSummaryIsVideo then ", video" else ""
-    , "): "
-    , intercalate "," $ map source lessonSummaryRel
-    , " vs "
-    , intercalate "," $ map sourceWithLevel lessonSummaryIrrel
-    , if includeHarmless
-        then "/" ++ intercalate "," (map sourceWithLevel lessonSummaryHarmless)
-        else ""
-    , " ("
-    , show $ length lessonSummaryRel
-    , " vs "
-    , show $ length lessonSummaryIrrel
-    , if includeHarmless
-        then "/" ++ show (length lessonSummaryHarmless)
-        else ""
-    , ")"
-    ]
-  where
-    sourceWithLevel :: (Word, [HSKLevel]) -> String
-    sourceWithLevel (Word{..}, levels) = source ++ show levels
-
-showWordSummary :: WordSummary -> String
-showWordSummary WordSummary{..} = concat [
-      wordSummarySimpl
-    , " ("
-    , show $ length wordSummaryAppearsIn
-    , ")"
-    ]
-
-summarizeLesson :: LessonInfo -> IO LessonSummary
-summarizeLesson LessonInfo{ lessonId
-                          , lesson   = Lesson{..}
-                          , relevant = RelevantLesson{..}
-                          } = do
-    allHarmless <- getHarmless
-
-    let isHarmless :: Word -> Bool
-        isHarmless w = source w `Set.member` allHarmless
-
-        (harmless, notHarmless) = partition (isHarmless . fst) irrel
-
-    return LessonSummary {
-        lessonSummaryId       = lessonId
-      , lessonSummaryTitle    = title
-      , lessonSummaryIsVideo  = isVideo
-      , lessonSummaryReleased = released
-      , lessonSummaryLevel    = level
-      , lessonSummaryRel      = rel
-      , lessonSummaryHarmless = harmless
-      , lessonSummaryIrrel    = notHarmless
-      }
-
-summarizeWord :: Word -> IO WordSummary
-summarizeWord Word{..} = do
-    (AnalysisStatic{analysisInverse}, _dyn) <- readIORef globalAnalysisState
-
-    return WordSummary {
-        wordSummarySimpl     = source
-      , wordSummaryAppearsIn = analysisInverse `mapAt` source
-      }
-
-getInFocusAvailable :: IO [LessonInfo]
-getInFocusAvailable = do
-    inFocus <- getFocus
-    filter inFocus <$> getAvailableInfo
-
--- | Show a readable summary of what's left to do
-summarizeUsing :: (Ord a, Ord b) =>
-                  (LessonSummary -> a) -- Sort key for lessons
-               -> (WordSummary   -> b) -- Sort key forwords
-               -> IO ()
-summarizeUsing lessonKey wordKey = do
-    (_static, AnalysisDynamic{analysisTodo}) <- readIORef globalAnalysisState
-
-    available <- mapM summarizeLesson =<< getInFocusAvailable
-    picked    <- mapM summarizeLesson =<< getPickedInfo
-    todo      <- mapM summarizeWord analysisTodo
-    zoomedIn  <- isZoomedIn
-
-    putStrLn $ "Available lessons (" ++ show (length available) ++ ")"
-            ++ if zoomedIn then " (zoomed in)" else ""
-    putStrLn $ "---------------------------------------------------------------"
-    putStrLn $ intercalate "\n"
-             $ map (showLessonSummary False)
-             $ sortBy (comparing lessonKey)
-             $ available
-    putStrLn $ ""
-
-    putStrLn $ "Picked lessons (" ++ show (length picked) ++ ")"
-    putStrLn $ "---------------------------------------------------------------"
-    putStrLn $ intercalate "\n" $ map (showLessonSummary False) picked
-    putStrLn $ ""
-
-    putStrLn $ "Words left (" ++ show (length analysisTodo) ++ ")"
-    putStrLn $ "---------------------------------------------------------------"
-    putStrLn $ intercalate ","
-             $ map showWordSummary
-             $ sortBy (comparing wordKey)
-             $ todo
-    putStrLn $ ""
-
--- | Show information about a given lesson
-infoLesson :: V3Id -> IO ()
-infoLesson lessonId = do
-    (AnalysisStatic{..}, AnalysisDynamic{..}) <- readIORef globalAnalysisState
-
-    putStrLn . dumpStr $ analysisAllLessons `mapAt` lessonId
-
-    forM_ (lookup lessonId analysisPicked) $ \relevantLesson -> do
-      putStrLn "We picked this lesson:"
-      putStrLn . dumpStr $ relevantLesson
-
-    forM_ (Map.lookup lessonId analysisAvailable) $ \relevantLesson -> do
-      putStrLn "This lesson is available:"
-      putStrLn . dumpStr $ relevantLesson
-
--- | Show information about a given word
-infoWord :: Simpl -> IO ()
-infoWord source = do
-    (AnalysisStatic{analysisInverse}, _dyn) <- readIORef globalAnalysisState
-
-    let appearsIn :: [V3Id]
-        appearsIn = analysisInverse `mapAt` source
-
-    available <- mapM summarizeLesson =<< getInFocusAvailable
-
-    putStrLn "This word is in the vocab of the following available lessons:"
-    putStrLn $ "---------------------------------------------------------------"
-    putStrLn $ intercalate "\n"
-             $ map (showLessonSummary False)
-             $ sortBy (comparing countLessonRelIrrel)
-             $ filter ((`elem` appearsIn) . lessonSummaryId)
-             $ available
-    putStrLn $ ""
-
-{-------------------------------------------------------------------------------
   Search vocabulary for a word
 -------------------------------------------------------------------------------}
 
@@ -383,10 +231,11 @@ infoWord source = do
 -- (including this word appearing as a subword)
 searchVocab :: Simpl -> IO ()
 searchVocab word = do
+    st <- getState
     (AnalysisStatic{..}, AnalysisDynamic{..}) <- readIORef globalAnalysisState
     inFocus <- getFocus
 
-    let isMatching :: (V3Id, Lesson) -> Maybe (LessonInfo, String)
+    let isMatching :: (V3Id, Lesson) -> Maybe (Summary (V3Id, RelevantLesson), String)
         isMatching (v3id, lesson) = do
           guard $ any (\word' -> word `isInfixOf` source word') (key lesson ++ supDialog lesson)
           let mAlreadyPicked      = lookup v3id analysisPicked
@@ -395,26 +244,22 @@ searchVocab word = do
                 (Just alreadyPicked, _) -> (alreadyPicked, "already picked")
                 (_, Just available)     -> (available, "available")
                 (_, _)                  -> (irrelevantLesson lesson, "other")
-              lessonInfo          = LessonInfo v3id lesson relevant
-          guard $ inFocus lessonInfo
-          return (lessonInfo, comment)
+              lessonSummary       = summarise st (v3id, relevant)
+          guard $ inFocus lessonSummary
+          return (lessonSummary, comment)
 
-    let matchingLessons :: [(LessonInfo, String)]
+    let matchingLessons :: [(Summary (V3Id, RelevantLesson), String)]
         matchingLessons = mapMaybe isMatching (Map.toList analysisAllLessons)
-
-    summarized <- forM matchingLessons $ \(lessonInfo, comment) -> do
-      summary <- summarizeLesson lessonInfo
-      return (summary, comment)
 
     putStrLn $ word ++ " appears in the following in-focus lessons:"
     putStrLn "-----------------------------------------------------------------"
     putStrLn $ intercalate "\n"
              $ map showWithComment
-             $ sortBy (comparing (countLessonRelIrrel . fst))
-             $ summarized
+             $ sortByKey (fst `contramap` countLessonRelIrrel)
+             $ matchingLessons
   where
-    showWithComment :: (LessonSummary, String) -> String
-    showWithComment (summary, comment) = showLessonSummary True summary
+    showWithComment :: (Summary (V3Id, RelevantLesson), String) -> String
+    showWithComment (summary, comment) = pretty True summary
                                       ++ " (" ++ comment ++ ")"
 
 irrelevantLesson :: Lesson -> RelevantLesson
@@ -428,95 +273,97 @@ irrelevantLesson Lesson{..} = RelevantLesson{
 -------------------------------------------------------------------------------}
 
 -- | Number of relevant words in the vocabulary of the lesson
-countLessonRel :: LessonSummary -> Int
-countLessonRel LessonSummary{..} =
-    length lessonSummaryRel
+countLessonRel :: SortKey (Summary (V3Id, RelevantLesson))
+countLessonRel = SortKey $ \LessonSummary{..} ->
+    length lessonRel
 
 -- | Number of relevant and irrelevant words in the vocab of the lesson
 --
 -- We multiply the number of irrelevant words by -1, so that we sort them
 -- in the opposite direction.
-countLessonRelIrrel :: LessonSummary -> (Int, Int)
-countLessonRelIrrel LessonSummary{..} =
-    (length lessonSummaryRel, negate (length lessonSummaryIrrel))
+countLessonRelIrrel :: SortKey (Summary (V3Id, RelevantLesson))
+countLessonRelIrrel = SortKey $ \LessonSummary{..} ->
+    (length lessonRel, negate (length lessonHarmful))
 
 -- | Number of lessons that have this word in their key vocabulary
-countWordAppearsIn :: WordSummary -> Int
-countWordAppearsIn WordSummary{..} =
-    length wordSummaryAppearsIn
+countWordAppearsIn :: SortKey (Summary Simpl)
+countWordAppearsIn = SortKey $ \WordSummary{..} ->
+    length wordAppearsIn
 
 -- | Number of words in the irrelevant key vocabulary that are not in the
 -- specified HSK levels
-countReallyIrrelevant :: [HSKLevel] -> LessonSummary -> Int
-countReallyIrrelevant ls LessonSummary{..} =
-  length $ filter (none (`elem` ls) . snd) lessonSummaryIrrel
-
--- | Summarize using default sorting
-summarize :: IO ()
-summarize = summarizeUsing countLessonRelIrrel countWordAppearsIn
+countReallyIrrelevant :: [HSKLevel] -> SortKey (Summary (V3Id, RelevantLesson))
+countReallyIrrelevant ls = SortKey $ \LessonSummary{..} ->
+    length $ filter (none (`elem` ls) . snd) lessonHarmful
 
 {-------------------------------------------------------------------------------
   Predicates on lessons
 -------------------------------------------------------------------------------}
 
-type LessonPredicate = LessonInfo -> Bool
+type LessonPredicate = Summary (V3Id, RelevantLesson) -> Bool
 
 atLevel :: [Level] -> LessonPredicate
-atLevel ls LessonInfo{lesson = Lesson{..}} =
-    level `elem` ls
+atLevel ls LessonSummary{..} = lessonLevel `elem` ls
 
 -- | Only allow irrelevant words from the specified HSK levels
 irrelInHSK :: [HSKLevel] -> LessonPredicate
-irrelInHSK ls LessonInfo{relevant = RelevantLesson{..}} =
-    all (any (`elem` ls) . snd) irrel
+irrelInHSK ls LessonSummary{..} = all (any (`elem` ls) . snd) lessonHarmful
 
 -- | Maximum number of irrelevant words
 maxNumIrrel :: Int -> LessonPredicate
-maxNumIrrel n LessonInfo{relevant = RelevantLesson{..}} =
-    length irrel <= n
+maxNumIrrel n LessonSummary{..} = length lessonHarmful <= n
 
 onlyLessons :: [V3Id] -> LessonPredicate
-onlyLessons lessonIds LessonInfo{lessonId = lessonId} =
-    lessonId `elem` lessonIds
+onlyLessons lessonIds LessonSummary{..} = lessonId `elem` lessonIds
+
+publishedAfter :: LocalTime -> LessonPredicate
+publishedAfter t LessonSummary{..} = lessonReleased >= t
+
+publishedAfterYear :: Int -> LessonPredicate
+publishedAfterYear year = publishedAfter t
+  where
+    t = parseTimeOrError
+          True
+          defaultTimeLocale
+          "%F %T"
+          (show year ++ "-01-01 00:00:00")
 
 {-------------------------------------------------------------------------------
   Operations on the dynamic state
 -------------------------------------------------------------------------------}
 
 filterLessons :: LessonPredicate -> IO ()
-filterLessons p = updateAnalysisState aux
+filterLessons p = updateDynamic_ aux
   where
-    aux :: AnalysisStatic -> AnalysisDynamic -> AnalysisDynamic
-    aux AnalysisStatic{..} AnalysisDynamic{..} = AnalysisDynamic{
-          analysisAvailable = Map.filterWithKey p' analysisAvailable
+    aux :: State -> AnalysisDynamic -> AnalysisDynamic
+    aux st AnalysisDynamic{..} = AnalysisDynamic{
+          analysisAvailable = Map.filterWithKey (curry p') analysisAvailable
         , ..
         }
       where
-        p' :: V3Id -> RelevantLesson -> Bool
-        p' lessonId relevant = p LessonInfo{
-            lessonId = lessonId
-          , lesson   = analysisAllLessons `mapAt` lessonId
-          , relevant = relevant
-          }
+        p' :: (V3Id, RelevantLesson) -> Bool
+        p' = p . summarise st
 
 -- | Remove a lesson from the available set
 dropLesson :: V3Id -> IO ()
 dropLesson lessonId' = filterLessons notSpecifiedLesson
   where
     notSpecifiedLesson :: LessonPredicate
-    notSpecifiedLesson LessonInfo{lessonId} = lessonId /= lessonId'
+    notSpecifiedLesson LessonSummary{lessonId} = lessonId /= lessonId'
 
 -- | Pick a lesson
 pick :: V3Id -> IO ()
-pick lessonId = updateAnalysisState aux
+pick lessonId = updateDynamic_ aux
   where
-    aux :: AnalysisStatic -> AnalysisDynamic -> AnalysisDynamic
-    aux AnalysisStatic{..} AnalysisDynamic{..} = AnalysisDynamic{
+    aux :: State -> AnalysisDynamic -> AnalysisDynamic
+    aux State{..} AnalysisDynamic{..} = AnalysisDynamic{
           analysisTodo      = analysisTodo'
         , analysisPicked    = analysisPicked'
         , analysisAvailable = analysisAvailable'
         }
       where
+        AnalysisStatic{..} = stateStatic
+
         analysisTodo'      = filter (not . inLesson) analysisTodo
         analysisPicked'    = analysisPicked ++ [(lessonId, pickedLesson)]
         analysisAvailable' = cullRelevant pickedLessonWords $
@@ -535,9 +382,9 @@ pick lessonId = updateAnalysisState aux
 
 -- | Remove a word from TODO without actually covering it
 skip :: Simpl -> IO ()
-skip simpl = updateAnalysisState aux
+skip simpl = updateDynamic_ aux
   where
-    aux :: AnalysisStatic -> AnalysisDynamic -> AnalysisDynamic
+    aux :: State -> AnalysisDynamic -> AnalysisDynamic
     aux _ AnalysisDynamic{..} = AnalysisDynamic{
           analysisTodo      = analysisTodo'
         , analysisPicked    = analysisPicked
@@ -553,15 +400,17 @@ skip simpl = updateAnalysisState aux
 -- NOTE: This may reintroduce lessons into 'analysisAvailable' that were
 -- previously explicitly removed.
 unskip :: Simpl -> IO ()
-unskip simpl = updateAnalysisState aux
+unskip simpl = updateDynamic_ aux
   where
-    aux :: AnalysisStatic -> AnalysisDynamic -> AnalysisDynamic
-    aux AnalysisStatic{..} AnalysisDynamic{..} = AnalysisDynamic{
+    aux :: State -> AnalysisDynamic -> AnalysisDynamic
+    aux State{..} AnalysisDynamic{..} = AnalysisDynamic{
           analysisTodo      = newTodo ++ analysisTodo
         , analysisPicked    = analysisPicked
         , analysisAvailable = Map.union newAvailable analysisAvailable
         }
       where
+        AnalysisStatic{..} = stateStatic
+
         newTodo      = filter ((== simpl) . source) analysisAllWords
         newAvailable = initRelevant (Set.singleton simpl) analysisAllLessons
 
@@ -590,23 +439,15 @@ setFocus = writeIORef globalFocus . predicateToFocus
 
 -- | Get current focus as a predicate
 getFocus :: IO LessonPredicate
-getFocus = focusToPredicate <$> readIORef globalFocus
-  where
-    focusToPredicate :: Focus -> LessonPredicate
-    focusToPredicate FocusAll         _ = True
-    focusToPredicate (FocusZoom p ps) l = p l && focusToPredicate ps l
+getFocus = focusPredicate <$> readIORef globalFocus
+
+focusPredicate :: Focus -> LessonPredicate
+focusPredicate FocusAll         _ = True
+focusPredicate (FocusZoom p ps) l = p l && focusPredicate ps l
 
 -- | Zoom all the way out
 resetFocus :: IO ()
 resetFocus = writeIORef globalFocus FocusAll
-
--- | Are we applying some predicates?
-isZoomedIn :: IO Bool
-isZoomedIn = do
-    focus <- readIORef globalFocus
-    case focus of
-      FocusAll   -> return False
-      _otherwise -> return True
 
 data Focus =
     -- | Show all available lessons
@@ -690,10 +531,6 @@ saveHarmless fp = encodeFile fp =<< readIORef globalHarmless
 openHarmless :: FilePath -> IO ()
 openHarmless fp = writeIORef globalHarmless =<< decodeFile fp
 
--- | Get current list of harmless words
-getHarmless :: IO (Set Simpl)
-getHarmless = readIORef globalHarmless
-
 -- | Show current words marked as harmless
 showHarmless :: IO ()
 showHarmless = putStrLn . format . Set.toList =<< readIORef globalHarmless
@@ -715,14 +552,13 @@ globalHarmless = unsafePerformIO $ newIORef Set.empty
 -- lessons will improve the statistics).
 analyzeIrrelevant :: V3Id -> IO ()
 analyzeIrrelevant lessonId = do
+    st <- getState
     (AnalysisStatic{..}, AnalysisDynamic{..}) <- readIORef globalAnalysisState
-    let lesson     = analysisAllLessons `mapAt` lessonId
-        relevant   = case lookup lessonId analysisPicked of
-                       Just rl -> rl
-                       Nothing -> analysisAvailable  `mapAt` lessonId
-        lessonInfo = LessonInfo lessonId lesson relevant
-    summary <- summarizeLesson lessonInfo
-    forM_ (lessonSummaryIrrel summary) $ \(word, levels) -> do
+    let relevant = case lookup lessonId analysisPicked of
+                     Just rl -> rl
+                     Nothing -> analysisAvailable  `mapAt` lessonId
+        summary  = summarise st (lessonId, relevant)
+    forM_ (lessonHarmful summary) $ \(word, levels) -> do
       putStrLn $ "* " ++ source word ++ " " ++ show levels
       let split     = hskSplits (source word)
           covered   = concatMap (source . snd) split
@@ -749,15 +585,16 @@ analyzeIrrelevant lessonId = do
   list when new dialogues have been published.
 -------------------------------------------------------------------------------}
 
-type Improvement = RelevantLesson                       -- ^ Current choice
+type Improvement = State                                -- ^ Currnet state
+                -> (V3Id, RelevantLesson)               -- ^ Current choice
                 -> [(V3Id, RelevantLesson)]             -- ^ Available choices
                 -> Either String (V3Id, RelevantLesson) -- ^ New choice, if any
 
-improveLocal :: Improvement -> IO [String]
-improveLocal f = updateAnalysisState' aux
+improveLocal :: Handle -> Improvement -> IO ()
+improveLocal h f = updateDynamic aux >>= mapM_ (hPutStr h)
   where
-    aux :: AnalysisStatic -> AnalysisDynamic -> (AnalysisDynamic, [String])
-    aux AnalysisStatic{..} AnalysisDynamic{..} = ( AnalysisDynamic{
+    aux :: State -> AnalysisDynamic -> (AnalysisDynamic, [String])
+    aux st@State{..} AnalysisDynamic{..} = ( AnalysisDynamic{
             analysisPicked    = newPicked
           , analysisAvailable = cullRelevant newCovered analysisAvailable
           , analysisTodo      = filter
@@ -767,6 +604,8 @@ improveLocal f = updateAnalysisState' aux
         , msgs
         )
       where
+        AnalysisStatic{..} = stateStatic
+
         newPicked :: [(V3Id, RelevantLesson)]
         msgs      :: [String]
         (newPicked, msgs) = unzip $ map tryPickNew analysisPicked
@@ -777,11 +616,12 @@ improveLocal f = updateAnalysisState' aux
         tryPickNew :: (V3Id, RelevantLesson) -> ((V3Id, RelevantLesson), String)
         tryPickNew (oldId, old) =
             case f' (oldId, old) of
-              Left  msg          -> ((oldId, old), msg)
-              Right (newId, new) -> undefined -- TODO
+              Left  msg            -> ((oldId, old), msg)
+              Right (_newId, _new) -> undefined -- TODO
 
         f' :: (V3Id, RelevantLesson) -> Either String (V3Id, RelevantLesson)
-        f' (oldId, old) = f old (Map.toList $ Map.delete oldId candidates)
+        f' (oldId, old) =
+            f st (oldId, old) (Map.toList $ Map.delete oldId candidates)
           where
             oldRel     = Set.fromList $ map source (rel old)
             allCovered = \newRel -> all (\w -> w `elem` newRel) (rel old)
@@ -789,9 +629,22 @@ improveLocal f = updateAnalysisState' aux
                            (mkRelevant allCovered oldRel)
                            analysisAllLessons
 
--- | For debugging: never suggest improvements, just show the candidates
-dontImprove :: Improvement
-dontImprove old candidates = Left $ show (old, candidates)
+-- | For debugging: never suggest improvements, just show matching candidates
+showCandidates :: LessonPredicate -> Improvement
+showCandidates _ st (oldId, old) _ | null (rel old) = Left $ unlines [
+      "### Warning: empty relevant set in " ++ pretty' (summarise st (oldId, old))
+    ]
+showCandidates p st old candidates =
+    if null filtered
+      then Left []
+      else Left $ unlines [
+          "### Improving: " ++ pretty' (summarise st old)
+        , "Candidates:"
+        , concatMap (\c -> "* " ++ pretty' c ++ "\n") filtered
+        ]
+  where
+    summarized = map (summarise st) candidates
+    filtered   = filter p summarized
 
 {-------------------------------------------------------------------------------
   Export
@@ -802,54 +655,49 @@ exportPleco = exportPleco' (const True)
 
 exportPleco' :: LessonPredicate -> String -> String -> IO ()
 exportPleco' p fileName topCategory = do
-    picked <- filter p <$> getPickedInfo
+    picked <- filter p . statePicked <$> getStateSummary
     withFile fileName AppendMode $ \h ->
-      forM_ (sortBy (comparing exportSortKey) picked) $
-        \LessonInfo{lessonId = _v3Id, lesson = Lesson{..}, relevant = RelevantLesson{..}} -> do
-          hPutStrLn h $ "//" ++ topCategory ++ "/" ++ title ++ " (" ++ dumpStr level ++ ")"
-          forM_ (rel ++ map fst irrel) $ hPutStrLn h . source
+      forM_ (sortBy (comparing exportSortKey) picked) $ \l@LessonSummary{..} -> do
+        hPutStrLn h $ "//" ++ topCategory ++ "/" ++ lessonTitle ++ " (" ++ dumpStr lessonLevel ++ ")"
+        forM_ (lessonRel ++ map fst (lessonAllIrrel l)) $ hPutStrLn h . source
 
 exportMarkdown :: String -> String -> IO ()
 exportMarkdown = exportMarkdown' (const True)
 
 exportMarkdown' :: LessonPredicate -> String -> String -> IO ()
 exportMarkdown' p fileName header = do
-    picked <- filter p <$> getPickedInfo
+    picked <- filter p . statePicked <$> getStateSummary
     withFile fileName AppendMode $ \h -> do
       hPutStrLn h $ header
       hPutStrLn h $ replicate (length header) '-'
-      forM_ (sortBy (comparing exportSortKey) picked) $
-        \LessonInfo{lessonId = v3Id, lesson = Lesson{..}, relevant = RelevantLesson{..}} -> do
-           content :: API.LessonContent <- decodeFile $ "content/" ++ v3IdString v3Id
-           let url = "https://chinesepod.com/lessons/" ++ API.lessonContentSlug content
-           hPutStrLn h $ "* [" ++ title ++ " (" ++ dumpStr level ++ ")](" ++ url ++ ")"
+      forM_ (sortBy (comparing exportSortKey) picked) $ \LessonSummary{..} -> do
+        content :: API.LessonContent <- decodeFile $ "content/" ++ v3IdString lessonId
+        let url = "https://chinesepod.com/lessons/" ++ API.lessonContentSlug content
+        hPutStrLn h $ "* [" ++ lessonTitle ++ " (" ++ dumpStr lessonLevel ++ ")](" ++ url ++ ")"
 
 downloadAudio :: FilePath -> IO ()
 downloadAudio = downloadAudio' (const True)
 
 downloadAudio' :: LessonPredicate -> FilePath -> IO ()
 downloadAudio' p dest = do
-    picked <- filter p <$> getPickedInfo
-    forM_ (zip [1..] (sortBy (comparing exportSortKey) picked)) $
-      \(i, LessonInfo{lessonId = v3Id, lesson = Lesson{..}, relevant = RelevantLesson{..}}) -> do
-         content :: API.LessonContent <- decodeFile $ "content/" ++ v3IdString v3Id
-         let slug               = API.lessonContentSlug content
-             Just mp3FullLesson = API.lessonContentCdQualityMp3 content
-             pref               = printf "%03d" (i :: Int) ++ "-"
-             filename           = pref ++ slug ++ ".mp3"
-             pathLesson         = dest </> "lesson"   </> filename
-             pathDialogue       = dest </> "dialogue" </> filename
+    picked <- filter p . statePicked <$> getStateSummary
+    forM_ (zip [1..] (sortBy (comparing exportSortKey) picked)) $ \(i, LessonSummary{..}) -> do
+      content :: API.LessonContent <- decodeFile $ "content/" ++ v3IdString lessonId
+      let slug               = API.lessonContentSlug content
+          Just mp3FullLesson = API.lessonContentCdQualityMp3 content
+          pref               = printf "%03d" (i :: Int) ++ "-"
+          filename           = pref ++ slug ++ ".mp3"
+          pathLesson         = dest </> "lesson"   </> filename
+          pathDialogue       = dest </> "dialogue" </> filename
 
-         unlessFileExists pathLesson $
-           callProcess "curl" [mp3FullLesson, "-o", pathLesson]
+      unlessFileExists pathLesson $
+        callProcess "curl" [mp3FullLesson, "-o", pathLesson]
 
-         case API.lessonContentDialogueMp3  content of
-           Nothing ->
-             return () -- QW don't have dialogues
-           Just mp3Dialogue -> unlessFileExists pathDialogue $
-             callProcess "curl" [mp3Dialogue, "-o", pathDialogue]
-
-
+      case API.lessonContentDialogueMp3  content of
+        Nothing ->
+          return () -- QW don't have dialogues
+        Just mp3Dialogue -> unlessFileExists pathDialogue $
+          callProcess "curl" [mp3Dialogue, "-o", pathDialogue]
   where
     -- Technically, this has a race condition, but who cares
     unlessFileExists :: FilePath -> IO () -> IO ()
@@ -858,9 +706,9 @@ downloadAudio' p dest = do
       if exists then putStrLn $ "Skipping " ++ fp
                 else act
 
--- Sort by level, then by ID
-exportSortKey :: LessonInfo -> (Level, V3Id)
-exportSortKey LessonInfo{lessonId = v3id, lesson = Lesson{..}} = (level, v3id)
+-- | Sort by level, then by ID
+exportSortKey :: Summary (V3Id, RelevantLesson) -> (Level, V3Id)
+exportSortKey LessonSummary{..} = (lessonLevel, lessonId)
 
 {-------------------------------------------------------------------------------
   Statistics
@@ -884,13 +732,11 @@ printStats = printStats' (const True)
 
 printStats' :: LessonPredicate -> IO ()
 printStats' p = do
-    picked   <- filter p <$> getPickedInfo
-    harmless <- getHarmless
+    picked <- filter p . statePicked <$> getStateSummary
 
     let totalRel, totalIrrel :: Set Simpl
-        totalRel    = Set.fromList $ concatMap getRel picked
-        totalIrrel' = concatMap getIrrel picked
-        totalIrrel  = Set.fromList $ filter (`notElem` harmless) totalIrrel'
+        totalRel    = Set.fromList $ concatMap getRel     picked
+        totalIrrel  = Set.fromList $ concatMap getHarmful picked
 
         statsNumPicked  = length picked
         statsNumRel     = length totalRel
@@ -898,19 +744,299 @@ printStats' p = do
         statsRelVsIrrel = (fromIntegral statsNumRel / fromIntegral (statsNumRel + statsNumIrrel)) * 100
     putStrLn $ dumpStr Stats{..}
   where
-    getRel, getIrrel :: LessonInfo -> [Simpl]
-    getRel   LessonInfo{relevant = RelevantLesson{..}} = map source rel
-    getIrrel LessonInfo{relevant = RelevantLesson{..}} = map (source . fst) irrel
+    getRel, getHarmful :: Summary (V3Id, RelevantLesson) -> [Simpl]
+    getRel     LessonSummary{..} = map source         lessonRel
+    getHarmful LessonSummary{..} = map (source . fst) lessonHarmful
+
+{-------------------------------------------------------------------------------
+  Complete analysis state
+-------------------------------------------------------------------------------}
+
+data State = State {
+      stateStatic   :: AnalysisStatic
+    , stateDynamic  :: AnalysisDynamic
+    , stateHarmless :: Set Simpl
+    , stateFocus    :: Focus
+    }
+
+getState :: IO State
+getState = uncurry State <$> readIORef globalAnalysisState
+                         <*> readIORef globalHarmless
+                         <*> readIORef globalFocus
+
+updateDynamic :: (State -> AnalysisDynamic -> (AnalysisDynamic, b)) -> IO b
+updateDynamic f = do
+    st <- getState
+    atomicModifyIORef globalAnalysisState $ \(static, dyn) ->
+      first (static, ) $ f st dyn
+
+updateDynamic_ :: (State -> AnalysisDynamic -> AnalysisDynamic) -> IO ()
+updateDynamic_ f = updateDynamic $ \st -> (, ()) . f st
+
+{-------------------------------------------------------------------------------
+  Summarising
+-------------------------------------------------------------------------------}
+
+class Summarise a where
+  data Summary a :: *
+
+  -- | Construct a summary, given the curent analysis state
+  summarise :: State -> a -> Summary a
+
+instance Summarise (V3Id, RelevantLesson) where
+  data Summary (V3Id, RelevantLesson) = LessonSummary {
+        lessonId       :: V3Id
+      , lessonTitle    :: String
+      , lessonIsVideo  :: Bool
+      , lessonReleased :: LocalTime
+      , lessonLevel    :: Level
+      , lessonRel      :: [Word]
+
+        -- | Irrelevant but harmless
+      , lessonHarmless :: [(Word, [HSKLevel])]
+
+        -- | Truly irrelevant
+      , lessonHarmful  :: [(Word, [HSKLevel])]
+      }
+
+  summarise State{..} (lessonId, RelevantLesson{..}) = LessonSummary {
+        lessonId       = lessonId
+      , lessonTitle    = title
+      , lessonIsVideo  = isVideo
+      , lessonReleased = released
+      , lessonLevel    = level
+      , lessonRel      = rel
+      , lessonHarmless = harmless
+      , lessonHarmful  = harmful
+      }
+    where
+      AnalysisStatic{analysisAllLessons} = stateStatic
+      Lesson{..} = analysisAllLessons `mapAt` lessonId
+
+      isHarmless :: Word -> Bool
+      isHarmless w = source w `Set.member` stateHarmless
+
+      (harmless, harmful) = partition (isHarmless . fst) irrel
+
+lessonAllIrrel :: Summary (V3Id, RelevantLesson) -> [(Word, [HSKLevel])]
+lessonAllIrrel LessonSummary{..} = lessonHarmless ++ lessonHarmful
+
+instance Summarise Simpl where
+  data Summary Simpl = WordSummary {
+        wordSimpl       :: Simpl
+      , wordAppearsIn   :: [V3Id]
+      , wordInAvailable :: [Summary (V3Id, RelevantLesson)]
+      }
+
+  summarise st@State{..} source = WordSummary{..}
+    where
+      wordSimpl       = source
+      wordAppearsIn   = analysisInverse `mapAt` source
+      wordInAvailable = filter ((`elem` wordAppearsIn) . lessonId) available
+
+      AnalysisStatic{..} = stateStatic
+      StateSummary{stateInFocusAvailable = available} = summarise st st
+
+instance Summarise V3Id where
+  data Summary V3Id =
+      -- | We already picked this lesson
+      LessonPicked (Summary (V3Id, RelevantLesson))
+
+      -- | This lesson is still available to pick
+    | LessonAvailable (Summary (V3Id, RelevantLesson))
+
+      -- | This lesson is neither picked nor available
+    | LessonUnavailable Lesson
+
+      -- | This 'V3Id' is unknown
+    | LessonUnknownV3Id V3Id
+
+  summarise st@State{..} lessonId
+    | Just relevantLesson <- lookup lessonId analysisPicked =
+        LessonPicked (summarise st (lessonId, relevantLesson))
+    | Just relevantLesson <- Map.lookup lessonId analysisAvailable =
+        LessonAvailable (summarise st (lessonId, relevantLesson))
+    | Just lesson <- Map.lookup lessonId analysisAllLessons =
+        LessonUnavailable lesson
+    | otherwise =
+        LessonUnknownV3Id lessonId
+    where
+      AnalysisStatic{analysisAllLessons} = stateStatic
+      AnalysisDynamic{analysisPicked, analysisAvailable} = stateDynamic
+
+
+instance Summarise State where
+  data Summary State = StateSummary {
+        stateAvailable        :: [Summary (V3Id, RelevantLesson)]
+      , stateInFocusAvailable :: [Summary (V3Id, RelevantLesson)]
+      , statePicked           :: [Summary (V3Id, RelevantLesson)]
+      , stateTodo             :: [Summary Simpl]
+      , stateIsZoomedIn       :: Bool
+      }
+
+  summarise st State{..} = StateSummary {..}
+    where
+      stateAvailable        = map (summarise st) (Map.toList analysisAvailable)
+      statePicked           = map (summarise st) analysisPicked
+      stateTodo             = map (summarise st . source) analysisTodo
+      stateInFocusAvailable = filter (focusPredicate stateFocus) stateAvailable
+      stateIsZoomedIn       = case stateFocus of
+                                FocusAll   -> False
+                                _otherwise -> True
+
+      AnalysisDynamic{..} = stateDynamic
+
+{-------------------------------------------------------------------------------
+  (Stateful) convenience function to deal with summarising
+-------------------------------------------------------------------------------}
+
+showWithState :: Pretty a => PrettyOpts a -> (State -> a) -> IO ()
+showWithState opts f = getState >>= putStrLn . pretty opts . f
+
+showWithState' :: Pretty a => (State -> a) -> IO ()
+showWithState' f = getState >>= putStrLn . pretty' . f
+
+getStateSummary :: IO (Summary State)
+getStateSummary = (\st -> summarise st st) <$> getState
+
+-- | Show state summary
+showStateSummary :: IO ()
+showStateSummary = showWithState' $ \st -> summarise st st
+
+-- | Show information about a given lesson
+showLessonSummary :: V3Id -> IO ()
+showLessonSummary lessonId = showWithState' $ \st -> summarise st lessonId
+
+-- | Show information about a given word
+showWordSummary :: Simpl -> IO ()
+showWordSummary word = showWithState True $ \st -> summarise st word
+
+{-------------------------------------------------------------------------------
+  Pretty-printing
+-------------------------------------------------------------------------------}
+
+class Pretty a where
+  type family PrettyOpts a :: *
+
+  pretty :: PrettyOpts a -> a -> String
+  defaultPrettyOpts :: a -> PrettyOpts a
+
+pretty' :: Pretty a => a -> String
+pretty' a = pretty (defaultPrettyOpts a) a
+
+instance Pretty (Summary (V3Id, RelevantLesson)) where
+  type PrettyOpts (Summary (V3Id, RelevantLesson)) = Bool
+
+  defaultPrettyOpts _ = False
+
+  pretty includeHarmless LessonSummary{..} = concat [
+        v3IdString lessonId
+      , " ("
+      , lessonTitle
+      , ", "
+      , show $ lessonLevel
+      , ", "
+      , formatTime defaultTimeLocale "%F" lessonReleased
+      , if lessonIsVideo then ", video" else ""
+      , "): "
+      , intercalate "," $ map source lessonRel
+      , " vs "
+      , intercalate "," $ map sourceWithLevel lessonHarmful
+      , if includeHarmless
+          then "/" ++ intercalate "," (map sourceWithLevel lessonHarmless)
+          else ""
+      , " ("
+      , show $ length lessonRel
+      , " vs "
+      , show $ length lessonHarmful
+      , if includeHarmless
+          then "/" ++ show (length lessonHarmless)
+          else ""
+      , ")"
+      ]
+    where
+      sourceWithLevel :: (Word, [HSKLevel]) -> String
+      sourceWithLevel (Word{..}, levels) = source ++ show levels
+
+instance Pretty (Summary Simpl) where
+  -- | Should we summarise the available lessons this word appears in?
+  -- (If not, we just show /how many/ available lesson this word appears in.)
+  type PrettyOpts (Summary Simpl) = Bool
+  defaultPrettyOpts _ = False
+
+  pretty False WordSummary{..} = concat [
+        wordSimpl
+      , " ("
+      , show $ length wordAppearsIn
+      , "/"
+      , show $ length wordInAvailable
+      , ")"
+      ]
+  pretty True WordSummary{..} = unlines [
+        "This word is in the vocab of the following available lessons:"
+      , "-------------------------------------------------------------"
+      , intercalate "\n"
+          $ map (pretty False)
+          $ sortByKey countLessonRelIrrel
+          $ wordInAvailable
+      , ""
+      ]
+
+instance Pretty (Summary State) where
+  type PrettyOpts (Summary State) = (
+        SortKey (Summary (V3Id, RelevantLesson))
+      , SortKey (Summary Simpl)
+      )
+
+  defaultPrettyOpts _ = (countLessonRelIrrel, countWordAppearsIn)
+
+  pretty (lessonKey, wordKey)
+         StateSummary{
+             stateInFocusAvailable = available
+           , stateIsZoomedIn       = zoomedIn
+           , statePicked           = picked
+           , stateTodo             = todo
+           } = unlines [
+        "Available lessons (" ++ show (length available) ++ ")"
+          ++ if zoomedIn then " (zoomed in)" else ""
+      , "---------------------------------------------------------------"
+      , intercalate "\n" $ map (pretty False) $ sortByKey lessonKey $ available
+      , ""
+
+      , "Picked lessons (" ++ show (length picked) ++ ")"
+      , "---------------------------------------------------------------"
+      , intercalate "\n" $ map (pretty False) picked
+      , ""
+
+      , "Words left (" ++ show (length todo) ++ ")"
+      , "---------------------------------------------------------------"
+      , intercalate "," $ map pretty' $ sortByKey wordKey $ todo
+      , ""
+      ]
+
+instance Pretty (Summary V3Id) where
+  type PrettyOpts (Summary V3Id) = ()
+  defaultPrettyOpts _ = ()
+
+  pretty () (LessonPicked relevantLesson) = unlines [
+        "We picked this lesson:"
+      , pretty' relevantLesson
+      ]
+  pretty () (LessonAvailable relevantLesson) = unlines [
+        "This lesson is available:"
+      , pretty' relevantLesson
+      ]
+  pretty () (LessonUnavailable lesson) = unlines [
+        "This lesson is unavailable:"
+      , dumpStr lesson
+      ]
+  pretty () (LessonUnknownV3Id lessonId) = unlines [
+        "This V3Id is unknown: " ++ v3IdString lessonId
+      ]
 
 {-------------------------------------------------------------------------------
   Auxiliary
 -------------------------------------------------------------------------------}
-
-mapWithKey :: forall k a b. (k -> a -> b) -> [(k,a)] -> [(k,b)]
-mapWithKey f = map go
-  where
-    go :: (k,a) -> (k,b)
-    go (k,a) = (k, f k a)
 
 none :: (a -> Bool) -> [a] -> Bool
 none p = not . any p
@@ -926,3 +1052,11 @@ mapAt :: (Ord k, Show k) => Map k a -> k -> a
 mapAt mp k = case Map.lookup k mp of
                Just a  -> a
                Nothing -> error $ "Unknown key " ++ show k
+
+data SortKey a = forall b. Ord b => SortKey (a -> b)
+
+instance Contravariant SortKey where
+  contramap f (SortKey key) = SortKey (key . f)
+
+sortByKey :: SortKey a -> [a] -> [a]
+sortByKey (SortKey key) = sortBy (comparing key)

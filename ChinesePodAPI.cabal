@@ -39,6 +39,7 @@ library
                        , binary-orphans
                        , bytestring
                        , containers
+                       , contravariant
                        , cryptohash
                        , directory
                        , either
@@ -63,12 +64,15 @@ library
   default-extensions:  DataKinds
                        DeriveDataTypeable
                        DeriveGeneric
+                       FlexibleContexts
                        FlexibleInstances
+                       GADTs
                        GeneralizedNewtypeDeriving
                        LambdaCase
                        MultiParamTypeClasses
                        NamedFieldPuns
                        NoMonomorphismRestriction
+                       RankNTypes
                        RecordWildCards
                        ScopedTypeVariables
                        TupleSections
