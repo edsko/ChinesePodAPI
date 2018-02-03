@@ -71,6 +71,7 @@ library
                        NoMonomorphismRestriction
                        RecordWildCards
                        ScopedTypeVariables
+                       TupleSections
                        TypeFamilies
                        TypeOperators
   other-extensions:    OverloadedStrings

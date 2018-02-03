@@ -13,6 +13,7 @@ module Servant.ChinesePod.Analysis (
 
 import Prelude hiding (Word, words)
 import Control.Monad
+import Data.Bifunctor (first)
 import Data.Binary (encodeFile, decodeFile)
 import Data.IORef
 import Data.List (intercalate, sortBy, partition, nub, isInfixOf)
@@ -46,6 +47,12 @@ import qualified Servant.ChinesePod.Analysis.State.V2 as V2
 globalAnalysisState :: IORef AnalysisState
 {-# NOINLINE globalAnalysisState #-}
 globalAnalysisState = unsafePerformIO $ newIORef (error "state not loaded")
+
+updateAnalysisState' :: (AnalysisStatic -> AnalysisDynamic -> (AnalysisDynamic, b))
+                    -> IO b
+updateAnalysisState' f =
+    atomicModifyIORef globalAnalysisState $ \(static, dynamic) ->
+      first (static,) (f static dynamic)
 
 updateAnalysisState :: (AnalysisStatic -> AnalysisDynamic -> AnalysisDynamic)
                     -> IO ()
@@ -95,15 +102,17 @@ analysisDynamic AnalysisStatic{..} = AnalysisDynamic{..}
 initRelevant :: Set Simpl
              -> Map V3Id Lesson
              -> Map V3Id RelevantLesson
-initRelevant words = Map.mapMaybe relevantLesson
-  where
-    relevantLesson :: Lesson -> Maybe RelevantLesson
-    relevantLesson Lesson{..} = do
-      let (rel, irrel') = partition isRelevantWord (key ++ supDialog)
-          irrel         = map withLevel irrel'
-      guard $ not (null rel)
-      return RelevantLesson{..}
+initRelevant = Map.mapMaybe . mkRelevant (not . null)
 
+mkRelevant :: ([Word] -> Bool)  -- ^ Condition on the set of relevant words
+           -> Set Simpl         -- ^ Words of interest
+           -> Lesson -> Maybe RelevantLesson
+mkRelevant checkRel words Lesson{..} = do
+    let (rel, irrel') = partition isRelevantWord (key ++ supDialog)
+        irrel         = map withLevel irrel'
+    guard $ checkRel rel
+    return RelevantLesson{..}
+  where
     isRelevantWord :: Word -> Bool
     isRelevantWord Word{..} = source `Set.member` words
 
@@ -731,6 +740,58 @@ analyzeIrrelevant lessonId = do
 
     compact :: (HSKLevel, Word) -> String
     compact (level, word) = source word ++ "(" ++ show level ++ ")"
+
+{-------------------------------------------------------------------------------
+  Local optimization
+
+  Consider each already picked lesson and see if it can be replaced by another,
+  without replacing anything else. This is useful for instance when updating a
+  list when new dialogues have been published.
+-------------------------------------------------------------------------------}
+
+type Improvement = RelevantLesson                       -- ^ Current choice
+                -> [(V3Id, RelevantLesson)]             -- ^ Available choices
+                -> Either String (V3Id, RelevantLesson) -- ^ New choice, if any
+
+improveLocal :: Improvement -> IO [String]
+improveLocal f = updateAnalysisState' aux
+  where
+    aux :: AnalysisStatic -> AnalysisDynamic -> (AnalysisDynamic, [String])
+    aux AnalysisStatic{..} AnalysisDynamic{..} = ( AnalysisDynamic{
+            analysisPicked    = newPicked
+          , analysisAvailable = cullRelevant newCovered analysisAvailable
+          , analysisTodo      = filter
+                                  (\w -> source w `Set.notMember` newCovered)
+                                  analysisTodo
+          }
+        , msgs
+        )
+      where
+        newPicked :: [(V3Id, RelevantLesson)]
+        msgs      :: [String]
+        (newPicked, msgs) = unzip $ map tryPickNew analysisPicked
+
+        newCovered :: Set Simpl
+        newCovered = Set.fromList $ map source $ concatMap (rel . snd) newPicked
+
+        tryPickNew :: (V3Id, RelevantLesson) -> ((V3Id, RelevantLesson), String)
+        tryPickNew (oldId, old) =
+            case f' (oldId, old) of
+              Left  msg          -> ((oldId, old), msg)
+              Right (newId, new) -> undefined -- TODO
+
+        f' :: (V3Id, RelevantLesson) -> Either String (V3Id, RelevantLesson)
+        f' (oldId, old) = f old (Map.toList $ Map.delete oldId candidates)
+          where
+            oldRel     = Set.fromList $ map source (rel old)
+            allCovered = \newRel -> all (\w -> w `elem` newRel) (rel old)
+            candidates = Map.mapMaybe
+                           (mkRelevant allCovered oldRel)
+                           analysisAllLessons
+
+-- | For debugging: never suggest improvements, just show the candidates
+dontImprove :: Improvement
+dontImprove old candidates = Left $ show (old, candidates)
 
 {-------------------------------------------------------------------------------
   Export
