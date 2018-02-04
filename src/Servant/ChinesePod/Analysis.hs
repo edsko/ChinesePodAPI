@@ -2,17 +2,20 @@
 --
 -- This module is intended for use in @ghci@.
 module Servant.ChinesePod.Analysis (
-    -- * Initialization
+    -- * Global state
+    -- ** Initialization analysis state
     initState
   , resetVocab
-    -- * Saving and loading
-    -- ** Analysis state
+    -- ** Saving and loading analysis state
   , save
   , open
   , openV1
-    -- ** List of harmless words
+    -- ** Saving and loading list of harmless words
   , saveHarmless
   , openHarmless
+    -- ** Access global state
+  , State(..)
+  , getState
     -- * Tools
   , showLessonSummary
   , showWordSummary
@@ -39,6 +42,16 @@ module Servant.ChinesePod.Analysis (
   , showHskLevel
   , showHskSplits
   , showSearchHsk
+    -- * Automatic ranking
+  , Ranked(..)
+  , RankedCumulative(..)
+  , rank
+  , rankAll
+  , rankCumulative
+  , showRanking
+  , rcMaxLevel
+  , rcMinNew
+  , rcMaxNotInHSK
     -- * Dealing with harmless words
   , showHarmless
   , markHarmless
@@ -48,12 +61,14 @@ module Servant.ChinesePod.Analysis (
   , improveLocal
   , showCandidates
     -- * Export
-  , exportPleco
-  , exportPleco'
-  , exportMarkdown
-  , exportMarkdown'
-  , downloadAudio
-  , downloadAudio'
+    -- ** Handpicked lessons
+  , pickedToPleco
+  , pickedToMarkdown
+  , downloadPicked
+    -- ** Automatically ranked lessons
+  , rankedToPleco
+  , rankedToMarkdown
+  , downloadRanked
     -- * Statistics
   , printStats
   , printStats'
@@ -64,7 +79,7 @@ module Servant.ChinesePod.Analysis (
   , countLessonRelIrrel
   , countWordAppearsIn
   , countReallyIrrelevant
-    -- Re-exports
+    -- * Re-exports
   , module State
   , module Vocab
   , module HSK
@@ -73,15 +88,17 @@ module Servant.ChinesePod.Analysis (
 
 import Prelude hiding (Word, words)
 import Control.Monad
-import Data.Bifunctor (first)
+import Data.Bifunctor
 import Data.Binary (encodeFile, decodeFile)
+import Data.Fixed
+import Data.Function (on)
 import Data.Functor.Contravariant
 import Data.IORef
-import Data.List (intercalate, sortBy, partition, nub, isInfixOf)
+import Data.List (intercalate, sortBy, partition, nub, isInfixOf, maximumBy)
 import Data.Map (Map)
-import Data.Set (Set)
-import Data.Maybe (mapMaybe)
+import Data.Maybe (mapMaybe, fromJust, isNothing)
 import Data.Ord (comparing)
+import Data.Set (Set)
 import Data.Time
 import GHC.Generics (Generic)
 import System.Directory (doesFileExist)
@@ -95,7 +112,7 @@ import qualified Data.Map as Map hiding ((!))
 import qualified Data.Set as Set
 
 import Servant.ChinesePod.Analysis.State.V2           as State
-import Servant.ChinesePod.HSK.HSK2012                 as HSK
+import Servant.ChinesePod.HSK                         as HSK
 import Servant.ChinesePod.Vocab.V2                    as Vocab
 import qualified Servant.ChinesePod.API               as API
 import qualified Servant.ChinesePod.Analysis.State.V1 as V1
@@ -464,34 +481,15 @@ globalFocus = unsafePerformIO $ newIORef FocusAll
   HSK level for each word
 -------------------------------------------------------------------------------}
 
-hskLevel :: Simpl -> [(HSKLevel, Word)]
-hskLevel simpl = Map.findWithDefault [] simpl hskIndex
-
-hskIndex :: Map Simpl [(HSKLevel, Word)]
-hskIndex = Map.unionsWith (++) [
-      indexFor 1 hsk1
-    , indexFor 2 hsk2
-    , indexFor 3 hsk3
-    , indexFor 4 hsk4
-    , indexFor 5 hsk5
-    , indexFor 6 hsk6
-    ]
-  where
-    indexFor :: HSKLevel -> [Word] -> Map Simpl [(HSKLevel, Word)]
-    indexFor level = Map.fromList . map go
-      where
-        go :: Word -> (Simpl, [(HSKLevel, Word)])
-        go word@Word{..} = (source, [(level, word)])
-
 withLevel :: Word -> (Word, [HSKLevel])
-withLevel w = (w, map fst . hskLevel . source $ w)
+withLevel w = (w, map fst . hskWordLevel . source $ w)
 
 showHskLevel :: Simpl -> IO ()
-showHskLevel = putStrLn . dumpStr . hskLevel
+showHskLevel = putStrLn . dumpStr . hskWordLevel
 
 -- | Try to find split a word into smaller words which are in HSK levels
 hskSplits :: Simpl -> [(HSKLevel, Word)]
-hskSplits = nub . concatMap hskLevel . nub . concat . splits
+hskSplits = nub . concatMap hskWordLevel . nub . concat . splits
 
 showHskSplits :: Simpl -> IO ()
 showHskSplits w = do
@@ -501,7 +499,7 @@ showHskSplits w = do
 searchHsk :: String -> [(HSKLevel, Word)]
 searchHsk str = filter matches
               $ concat
-              $ Map.elems hskIndex
+              $ Map.elems hskWordIndex
   where
     matches :: (HSKLevel, Word) -> Bool
     matches (_, Word{..}) = or [
@@ -512,6 +510,195 @@ searchHsk str = filter matches
 
 showSearchHsk :: String -> IO ()
 showSearchHsk = putStrLn . dumpStr . searchHsk
+
+{-------------------------------------------------------------------------------
+  Automatic ranking of all dialogues
+
+  When we want fully automatic ranking of dialogues, we cannot really classify
+  words as 'harmless' or not. Instead, we look at individual characters only.
+-------------------------------------------------------------------------------}
+
+data Ranked = Ranked {
+      -- | Score
+      rankedScore :: Fixed E2
+
+      -- | All characters in the dialogue
+      --
+      -- This includes all characters in the key vocabulary, and those
+      -- characters in the supplementary vocabulary that also appear in the
+      -- dialogue.
+    , rankedAllChars :: Set Char
+
+      -- | All characters that appears in the level we're studying
+    , rankedInLevel :: Set Char
+
+      -- | All characters that appear in lower levels
+    , rankedInLower :: Set Char
+
+      -- | Characters in the dialogue that appear in _higher_ HSK levels
+    , rankedInHigher :: Set Char
+
+      -- | Characters in the dialogue that don't appear in the HSK at all
+    , rankedNotInHSK :: Set Char
+
+      -- | V3id of the lesson
+    , rankedId :: V3Id
+
+      -- | The lesson itself
+    , rankedLesson :: Lesson
+    }
+  deriving (Show)
+
+rank :: HSKLevel -> (V3Id, Lesson) -> Ranked
+rank l (rankedId, rankedLesson@Lesson{..}) = Ranked {..}
+  where
+    rankedScore :: Fixed E2
+    rankedScore = if numInLevel == 0
+                    then 0
+                    else fromIntegral numInLevel
+                       / fromIntegral (numAllChars - numInLower)
+
+    -- Classify all characters
+    --
+    -- We should have:
+    --
+    -- * rankedAllChars == unions [rankedRelevant, rankedInLower,
+    rankedAllChars, rankedInLevel, rankedInLower :: Set Char
+    rankedAllChars = Set.fromList $ flatten key ++ flatten supDialog
+    rankedInLevel  = Set.filter isThisLevel   rankedAllChars
+    rankedInLower  = Set.filter isLowerLevel  rankedAllChars
+    rankedInHigher = Set.filter isHigherLevel rankedAllChars
+    rankedNotInHSK = Set.filter isNotInHSK    rankedAllChars
+
+    numAllChars, numInLevel, numInLower :: Int
+    numAllChars = Set.size rankedAllChars
+    numInLevel  = Set.size rankedInLevel
+    numInLower  = Set.size rankedInLower
+
+    isThisLevel, isLowerLevel :: Char -> Bool
+    isThisLevel   = maybe False (\l' -> l' == l) . hskCharLevel
+    isLowerLevel  = maybe False (\l' -> l' <  l) . hskCharLevel
+    isHigherLevel = maybe False (\l' -> l' >  l) . hskCharLevel
+    isNotInHSK    = isNothing . hskCharLevel
+
+    flatten :: [Word] -> [Char]
+    flatten = concatMap source
+
+-- | Rank all dialogues
+rankAll :: HSKLevel -> Map V3Id Lesson -> [Ranked]
+rankAll l = map (rank l) . Map.toList
+
+-- | Cumulative information about the dialogue ranking
+data RankedCumulative = RankedCumulative {
+      -- | The actual ranked dialogue
+      ranked :: Ranked
+
+      -- | The set of characters that was covered by this dialogue
+      -- (that had not been covered previously)
+    , rankedNew :: Set Char
+    }
+  deriving (Show)
+
+rankedSortKey :: SortKey Ranked
+rankedSortKey = SortKey $ \Ranked{..} -> (
+      level rankedLesson                 -- prefer lower level
+    , negate rankedScore                 -- prefer higher score
+    , newerFirst $ released rankedLesson -- prefer newer lessons
+    )
+  where
+    newerFirst :: LocalTime -> Rational
+    newerFirst = negate . getModJulianDate . localTimeToUT1 0
+
+-- | Construct cumulative ranking
+--
+-- Also returns the characters that we not covered.
+rankCumulative :: HSKLevel                   -- ^ Level we want to study
+               -> (RankedCumulative -> Bool) -- ^ Possibility to filter out some lessons
+               -> Int                        -- ^ Maximum number of dialogues
+               -> Map V3Id Lesson            -- ^ Available lessons
+               -> (Set Char, [RankedCumulative])
+rankCumulative l p maxNum =
+      makeCumulative maxNum (fromJust $ lookup l hskAllChars)
+    . sortByKey rankedSortKey
+    . rankAll l
+  where
+    -- We leave the original sorting in place as much as possible
+    makeCumulative :: Int -> Set Char -> [Ranked] -> (Set Char, [RankedCumulative])
+    makeCumulative 0 todo _  = (todo, []) -- Maximum number of dialogues reached
+    makeCumulative _ todo [] = (todo, [])
+    makeCumulative n todo (r:rs)
+       -- Nothing left to cover
+       | Set.null todo =
+           (todo, [])
+       -- This dialogue does not cover /any/ characters in the chosen HSK level
+       -- We don't assume that the list is ordered by score, so we keep looking
+       | rankedScore r == 0 =
+           makeCumulative n todo rs
+       -- Nothing at this level satisfies the predicate
+       | Nothing <- candidate =
+           makeCumulative n todo rsOther
+       -- Even the best candidate with this score covers no new characters
+       | Just (best, _) <- candidate, Set.null (rankedNew best) =
+           makeCumulative n todo rsOther
+       -- Otherwise, use the best candidate
+       | Just (best, rest) <- candidate =
+           second (best :) $ makeCumulative
+                               (n - 1)
+                               (todo Set.\\ rankedNew best)
+                               (rest ++ rsOther)
+      where
+        (rsSame, rsOther) = span (sameScore r) rs
+        candidates = map (\r' -> (r', cumulative todo r')) (r:rsSame)
+        candidate  = pickCandidate candidates
+
+    -- | Pick a candidate with the maximum score, leaving the remaining lessons
+    -- in the original order
+    pickCandidate :: [(Ranked, RankedCumulative)] -> Maybe (RankedCumulative, [Ranked])
+    pickCandidate =
+          fmap aux
+        . pickBest (p . snd) (comparing $ Set.size . rankedNew . snd)
+      where
+        aux :: ((Ranked, RankedCumulative), [(Ranked, RankedCumulative)])
+            -> (RankedCumulative, [Ranked])
+        aux ((_, best), rest) = (best, map fst rest)
+
+    cumulative :: Set Char -> Ranked -> RankedCumulative
+    cumulative todo ranked@Ranked{..} = RankedCumulative {..}
+      where
+        rankedNew = Set.intersection rankedInLevel todo
+
+    -- We can use straight equality here since we use fixed precision
+    sameScore :: Ranked -> Ranked -> Bool
+    sameScore r1 r2 = rankedScore r1 == rankedScore r2
+
+getRanking :: HSKLevel
+           -> (RankedCumulative -> Bool)
+           -> Int
+           -> IO (Set Char, [RankedCumulative])
+getRanking l p n = aux <$> getState
+  where
+    aux :: State -> (Set Char, [RankedCumulative])
+    aux = rankCumulative l p n . analysisAllLessons . stateStatic
+
+showRanking :: HSKLevel -> (RankedCumulative -> Bool) -> Int -> IO ()
+showRanking l p n = do
+    (notCovered, ranked) <- getRanking l p n
+    mapM_ (putStrLn . pretty') ranked
+    putStrLn $ concat [
+        "("
+      , show (length ranked) ++ " dialogues, "
+      , show (Set.size notCovered) ++ " not covered: " ++ Set.toList notCovered
+      , ")"
+      ]
+
+rcMaxLevel :: Level -> RankedCumulative -> Bool
+rcMaxLevel l r = level (rankedLesson (ranked r)) <= l
+
+rcMinNew :: Int -> RankedCumulative -> Bool
+rcMinNew n r = Set.size (rankedNew r) >= n
+
+rcMaxNotInHSK :: Int -> RankedCumulative -> Bool
+rcMaxNotInHSK n r = Set.size (rankedNotInHSK (ranked r)) <= n
 
 {-------------------------------------------------------------------------------
   "Harmless" words are irrelevant words that don't really matter; for instance,
@@ -650,39 +837,36 @@ showCandidates p st old candidates =
   Export
 -------------------------------------------------------------------------------}
 
-exportPleco :: String -> String -> IO ()
-exportPleco = exportPleco' (const True)
+-- | Info we need to export a lesson
+data ExportInfo = ExportInfo {
+      exportId    :: V3Id   -- ^ ID of the lesson
+    , exportTitle :: String -- ^ Lesson title
+    , exportLevel :: Level  -- ^ Lesson level
+    , exportVocab :: [Word] -- ^ All vocabulary we should study for this lesson
+    }
 
-exportPleco' :: LessonPredicate -> String -> String -> IO ()
-exportPleco' p fileName topCategory = do
-    picked <- filter p . statePicked <$> getStateSummary
-    withFile fileName AppendMode $ \h ->
-      forM_ (sortBy (comparing exportSortKey) picked) $ \l@LessonSummary{..} -> do
-        hPutStrLn h $ "//" ++ topCategory ++ "/" ++ lessonTitle ++ " (" ++ dumpStr lessonLevel ++ ")"
-        forM_ (lessonRel ++ map fst (lessonAllIrrel l)) $ hPutStrLn h . source
+class ToExportInfo a where
+  toExportInfo :: a -> ExportInfo
 
-exportMarkdown :: String -> String -> IO ()
-exportMarkdown = exportMarkdown' (const True)
+exportPleco :: String -> String -> [ExportInfo] -> IO ()
+exportPleco fileName topCat exportInfo = withFile fileName AppendMode $ \h ->
+    forM_ exportInfo $ \ExportInfo{..} -> do
+      hPutStrLn h $ "//" ++ topCat ++ "/" ++ exportTitle ++ " (" ++ dumpStr exportLevel ++ ")"
+      forM_ exportVocab $ hPutStrLn h . source
 
-exportMarkdown' :: LessonPredicate -> String -> String -> IO ()
-exportMarkdown' p fileName header = do
-    picked <- filter p . statePicked <$> getStateSummary
-    withFile fileName AppendMode $ \h -> do
-      hPutStrLn h $ header
-      hPutStrLn h $ replicate (length header) '-'
-      forM_ (sortBy (comparing exportSortKey) picked) $ \LessonSummary{..} -> do
-        content :: API.LessonContent <- decodeFile $ "content/" ++ v3IdString lessonId
-        let url = "https://chinesepod.com/lessons/" ++ API.lessonContentSlug content
-        hPutStrLn h $ "* [" ++ lessonTitle ++ " (" ++ dumpStr lessonLevel ++ ")](" ++ url ++ ")"
+exportMarkdown :: FilePath -> String -> [ExportInfo] -> IO ()
+exportMarkdown fp header exportInfo = withFile fp AppendMode $ \h -> do
+    hPutStrLn h $ header
+    hPutStrLn h $ replicate (length header) '-'
+    forM_ exportInfo $ \ExportInfo{..} -> do
+      content :: API.LessonContent <- decodeFile $ "content/" ++ v3IdString exportId
+      let url = "https://chinesepod.com/lessons/" ++ API.lessonContentSlug content
+      hPutStrLn h $ "* [" ++ exportTitle ++ " (" ++ dumpStr exportLevel ++ ")](" ++ url ++ ")"
 
-downloadAudio :: FilePath -> IO ()
-downloadAudio = downloadAudio' (const True)
-
-downloadAudio' :: LessonPredicate -> FilePath -> IO ()
-downloadAudio' p dest = do
-    picked <- filter p . statePicked <$> getStateSummary
-    forM_ (zip [1..] (sortBy (comparing exportSortKey) picked)) $ \(i, LessonSummary{..}) -> do
-      content :: API.LessonContent <- decodeFile $ "content/" ++ v3IdString lessonId
+downloadAudio :: FilePath -> [ExportInfo] -> IO ()
+downloadAudio dest exportInfo = do
+    forM_ (zip [1..] exportInfo) $ \(i, ExportInfo{exportId}) -> do
+      content :: API.LessonContent <- decodeFile $ "content/" ++ v3IdString exportId
       let slug               = API.lessonContentSlug content
           Just mp3FullLesson = API.lessonContentCdQualityMp3 content
           pref               = printf "%03d" (i :: Int) ++ "-"
@@ -706,9 +890,76 @@ downloadAudio' p dest = do
       if exists then putStrLn $ "Skipping " ++ fp
                 else act
 
+{-------------------------------------------------------------------------------
+  Convenience functions for exporting picked lessons
+-------------------------------------------------------------------------------}
+
+instance ToExportInfo (Summary (V3Id, RelevantLesson)) where
+  toExportInfo l@LessonSummary{..} = ExportInfo {
+        exportId    = lessonId
+      , exportTitle = lessonTitle
+      , exportLevel = lessonLevel
+      , exportVocab = lessonRel ++ map fst (lessonAllIrrel l)
+      }
+
+pickedExportInfo :: LessonPredicate -> IO [ExportInfo]
+pickedExportInfo p = aux <$> getStateSummary
+  where
+    aux :: Summary State -> [ExportInfo]
+    aux = map toExportInfo
+        . sortByKey exportSortKey
+        . filter p
+        . statePicked
+
+pickedToPleco :: String -> String -> LessonPredicate -> IO ()
+pickedToPleco fp topCat p = pickedExportInfo p >>= exportPleco fp topCat
+
+pickedToMarkdown :: FilePath -> String -> LessonPredicate -> IO ()
+pickedToMarkdown fp header p = pickedExportInfo p >>= exportMarkdown fp header
+
+downloadPicked :: FilePath -> LessonPredicate -> IO ()
+downloadPicked dest p = pickedExportInfo p >>= downloadAudio dest
+
 -- | Sort by level, then by ID
-exportSortKey :: Summary (V3Id, RelevantLesson) -> (Level, V3Id)
-exportSortKey LessonSummary{..} = (lessonLevel, lessonId)
+exportSortKey :: SortKey (Summary (V3Id, RelevantLesson))
+exportSortKey = SortKey $ \LessonSummary{..} -> (lessonLevel, lessonId)
+
+{-------------------------------------------------------------------------------
+  Convenience functions for exporting automatic ranking
+-------------------------------------------------------------------------------}
+
+instance ToExportInfo Ranked where
+  toExportInfo Ranked{rankedLesson = Lesson{..}, ..} = ExportInfo {
+        exportId    = rankedId
+      , exportTitle = title
+      , exportLevel = level
+      , exportVocab = key ++ supDialog
+      }
+
+instance ToExportInfo RankedCumulative where
+  toExportInfo = toExportInfo . ranked
+
+rankedExportInfo :: HSKLevel -> (RankedCumulative -> Bool) -> Int
+                 -> IO [ExportInfo]
+rankedExportInfo l p n = (map toExportInfo . snd) <$> getRanking l p n
+
+rankedToPleco :: String -> String
+              -> HSKLevel -> (RankedCumulative -> Bool) -> Int
+              -> IO ()
+rankedToPleco fp topCat l p n =
+    rankedExportInfo l p n >>= exportPleco fp topCat
+
+rankedToMarkdown :: FilePath -> String
+                 -> HSKLevel -> (RankedCumulative -> Bool) -> Int
+                 -> IO ()
+rankedToMarkdown fp header l p n =
+    rankedExportInfo l p n >>= exportMarkdown fp header
+
+downloadRanked :: FilePath
+               -> HSKLevel -> (RankedCumulative -> Bool) -> Int
+               -> IO ()
+downloadRanked dest l p n =
+    rankedExportInfo l p n >>= downloadAudio dest
 
 {-------------------------------------------------------------------------------
   Statistics
@@ -1034,6 +1285,32 @@ instance Pretty (Summary V3Id) where
         "This V3Id is unknown: " ++ v3IdString lessonId
       ]
 
+instance Pretty RankedCumulative where
+  type PrettyOpts RankedCumulative = ()
+  defaultPrettyOpts _ = ()
+
+  pretty () RankedCumulative{ranked = Ranked{rankedLesson = Lesson{..}, ..}, ..} =
+      concat [
+          v3IdString rankedId
+        , " ("
+        , title
+        , ", "
+        , show level
+        , ", "
+        , formatTime defaultTimeLocale "%F" released
+        , if isVideo then ", video" else ""
+        , ") "
+        , "score: " ++ show rankedScore
+        , " ("
+        , show (Set.size rankedNew)      ++ " new, "
+        , show (Set.size rankedAllChars) ++ " total, "
+        , show (Set.size rankedInLevel)  ++ " in this level, "
+        , show (Set.size rankedInLower)  ++ " in lower levels, "
+        , show (Set.size rankedInHigher) ++ " in higher levels, "
+        , show (Set.size rankedNotInHSK) ++ " not in HSK"
+        , ")"
+        ]
+
 {-------------------------------------------------------------------------------
   Auxiliary
 -------------------------------------------------------------------------------}
@@ -1060,3 +1337,36 @@ instance Contravariant SortKey where
 
 sortByKey :: SortKey a -> [a] -> [a]
 sortByKey (SortKey key) = sortBy (comparing key)
+
+-- | Pick the largest element, returning the rest of the list in original order
+--
+-- If there are multiple elements that are compare EQ, we return the first.
+pickBest :: forall a.
+            (a -> Bool)          -- ^ Suitable element?
+         -> (a -> a -> Ordering) -- ^ Compare elements
+         -> [a]                  -- ^ Candidates
+         -> Maybe (a, [a])
+pickBest p f = \xs ->
+    let xss = filter (p . picked) $ reverse $ pickAll xs
+    in if null xss
+      then Nothing
+      else Just $ aux (maximumBy (f `on` picked) xss)
+  where
+    aux :: ([a], a, [a]) -> (a, [a])
+    aux (xs, y, zs) = (y, xs ++ zs)
+
+    picked :: ([a], a, [a]) -> a
+    picked (_, y, _) = y
+
+-- | All different ways to pick an element from a list
+pickAll :: [a] -> [([a], a, [a])]
+pickAll = mapMaybe aux . split2
+  where
+    aux :: ([a], [a]) -> Maybe ([a], a, [a])
+    aux (_  , []  ) = Nothing
+    aux (xs , y:ys) = Just (xs, y, ys)
+
+-- | All different ways to split a list into 2 lists (without reordering)
+split2 :: [a] -> [([a], [a])]
+split2 []     = [([], [])]
+split2 (x:xs) = ([], (x:xs)) : map (first (x:)) (split2 xs)

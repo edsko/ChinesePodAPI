@@ -15,13 +15,11 @@ import GHC.Generics (Generic)
 import Text.Show.Pretty (PrettyVal)
 
 import Servant.ChinesePod.Vocab.V1
+import Servant.ChinesePod.HSK (HSKLevel, Simpl)
 
 {-------------------------------------------------------------------------------
   State
 -------------------------------------------------------------------------------}
-
--- | Word in simplified characters
-type Simpl = String
 
 -- | The static part of the analysis (that doesn't change over time)
 data AnalysisStatic = AnalysisStatic {
@@ -88,9 +86,6 @@ data RelevantLesson = RelevantLesson {
     , irrel :: [(Word, [HSKLevel])]
     }
   deriving (Generic, Show)
-
--- | HSK level (1..6)
-type HSKLevel = Int
 
 instance PrettyVal AnalysisStatic
 instance PrettyVal AnalysisDynamic

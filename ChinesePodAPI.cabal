@@ -23,6 +23,7 @@ library
                        Servant.ChinesePod.Analysis.State.V1
                        Servant.ChinesePod.Analysis.State.V2
                        Servant.ChinesePod.Client
+                       Servant.ChinesePod.HSK
                        Servant.ChinesePod.HSK.Aux
                        Servant.ChinesePod.HSK.HSK2012
                        Servant.ChinesePod.Vocab.V1
