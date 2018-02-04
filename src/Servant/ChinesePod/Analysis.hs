@@ -867,21 +867,23 @@ downloadAudio :: FilePath -> [ExportInfo] -> IO ()
 downloadAudio dest exportInfo = do
     forM_ (zip [1..] exportInfo) $ \(i, ExportInfo{exportId}) -> do
       content :: API.LessonContent <- decodeFile $ "content/" ++ v3IdString exportId
-      let slug               = API.lessonContentSlug content
-          Just mp3FullLesson = API.lessonContentCdQualityMp3 content
-          pref               = printf "%03d" (i :: Int) ++ "-"
-          filename           = pref ++ slug ++ ".mp3"
-          pathLesson         = dest </> "lesson"   </> filename
-          pathDialogue       = dest </> "dialogue" </> filename
+      case API.lessonContentCdQualityMp3 content of
+        Nothing -> putStrLn $ "WARNING: No audio available for " ++ v3IdString exportId
+        Just mp3FullLesson -> do
+          let slug         = API.lessonContentSlug content
+              pref         = printf "%03d" (i :: Int) ++ "-"
+              filename     = pref ++ slug ++ ".mp3"
+              pathLesson   = dest </> "lesson"   </> filename
+              pathDialogue = dest </> "dialogue" </> filename
 
-      unlessFileExists pathLesson $
-        callProcess "curl" [mp3FullLesson, "-o", pathLesson]
+          unlessFileExists pathLesson $
+            callProcess "curl" [mp3FullLesson, "-o", pathLesson]
 
-      case API.lessonContentDialogueMp3  content of
-        Nothing ->
-          return () -- QW don't have dialogues
-        Just mp3Dialogue -> unlessFileExists pathDialogue $
-          callProcess "curl" [mp3Dialogue, "-o", pathDialogue]
+          case API.lessonContentDialogueMp3  content of
+            Nothing ->
+              return () -- QW don't have dialogues
+            Just mp3Dialogue -> unlessFileExists pathDialogue $
+              callProcess "curl" [mp3Dialogue, "-o", pathDialogue]
   where
     -- Technically, this has a race condition, but who cares
     unlessFileExists :: FilePath -> IO () -> IO ()
