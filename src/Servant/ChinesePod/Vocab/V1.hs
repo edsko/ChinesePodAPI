@@ -45,7 +45,7 @@ data Level =
   | UpperIntermediate
   | Advanced
   | Media
-  deriving (Generic, Data, Eq, Ord, Show)
+  deriving (Generic, Data, Eq, Ord, Show, Enum)
 
 data Vocab = Vocab {
       vocab :: Map V3Id Lesson

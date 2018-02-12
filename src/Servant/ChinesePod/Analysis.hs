@@ -60,19 +60,23 @@ module Servant.ChinesePod.Analysis (
   , Improvement
   , improveLocal
   , showCandidates
+  , recentCandidates
     -- * Export
     -- ** Handpicked lessons
   , pickedToPleco
   , pickedToMarkdown
+  , pickedToList
   , downloadPicked
     -- ** Automatically ranked lessons
   , rankedToPleco
   , rankedToMarkdown
+  , rankedToList
   , downloadRanked
     -- * Statistics
   , printStats
   , printStats'
     -- * Summarising
+  , Summary(..)
   , showStateSummary
     -- ** Sorting keys
   , countLessonRel
@@ -833,6 +837,16 @@ showCandidates p st old candidates =
     summarized = map (summarise st) candidates
     filtered   = filter p summarized
 
+-- | Convenience function: show recent candidate improvements from the
+-- specified levels
+recentCandidates :: FilePath -> Int -> [Level] -> IO ()
+recentCandidates fp year ls =
+    withFile fp WriteMode $ \h ->
+      improveLocal h $ showCandidates p
+  where
+    p :: LessonPredicate
+    p lesson = atLevel ls lesson && publishedAfterYear year lesson
+
 {-------------------------------------------------------------------------------
   Export
 -------------------------------------------------------------------------------}
@@ -862,6 +876,20 @@ exportMarkdown fp header exportInfo = withFile fp AppendMode $ \h -> do
       content :: API.LessonContent <- decodeFile $ "content/" ++ v3IdString exportId
       let url = "https://chinesepod.com/lessons/" ++ API.lessonContentSlug content
       hPutStrLn h $ "* [" ++ exportTitle ++ " (" ++ dumpStr exportLevel ++ ")](" ++ url ++ ")"
+
+-- | Export to simple list (primarily for debugging)
+exportList :: [ExportInfo] -> IO ()
+exportList exportInfo = do
+    forM_ exportInfo $ \ExportInfo{..} ->
+      putStrLn $ concat [
+            "* "
+          , v3IdString exportId
+          , " "
+          , exportTitle
+          , " ("
+          , dumpStr exportLevel
+          , ")"
+          ]
 
 downloadAudio :: FilePath -> [ExportInfo] -> IO ()
 downloadAudio dest exportInfo = do
@@ -919,6 +947,9 @@ pickedToPleco fp topCat p = pickedExportInfo p >>= exportPleco fp topCat
 pickedToMarkdown :: FilePath -> String -> LessonPredicate -> IO ()
 pickedToMarkdown fp header p = pickedExportInfo p >>= exportMarkdown fp header
 
+pickedToList :: LessonPredicate -> IO ()
+pickedToList p = pickedExportInfo p >>= exportList
+
 downloadPicked :: FilePath -> LessonPredicate -> IO ()
 downloadPicked dest p = pickedExportInfo p >>= downloadAudio dest
 
@@ -956,6 +987,10 @@ rankedToMarkdown :: FilePath -> String
                  -> IO ()
 rankedToMarkdown fp header l p n =
     rankedExportInfo l p n >>= exportMarkdown fp header
+
+rankedToList :: HSKLevel -> (RankedCumulative -> Bool) -> Int -> IO ()
+rankedToList l p n =
+    rankedExportInfo l p n >>= exportList
 
 downloadRanked :: FilePath
                -> HSKLevel -> (RankedCumulative -> Bool) -> Int
